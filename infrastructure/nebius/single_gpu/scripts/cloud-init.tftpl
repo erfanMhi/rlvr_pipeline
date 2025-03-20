@@ -1,0 +1,44 @@
+users:
+ - name: ${vm_username}
+   sudo: ALL=(ALL) NOPASSWD:ALL
+   shell: /bin/bash
+   ssh_authorized_keys:
+    - ${ssh_public_key}
+
+write_files:
+  - path: /home/${vm_username}/setup_and_run.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+
+      # Add error handling
+      set -e
+
+      cd /home/${vm_username}
+
+      # Create necessary directories with proper permissions
+      mkdir -p /home/${vm_username}/.local/bin
+      mkdir -p /home/${vm_username}/.local/share/pypoetry
+
+      # Clone the repository
+      git clone https://github.com/erfanMhi/distributed_training.git
+      cd distributed_training
+
+      # Install Poetry
+      curl -sSL https://install.python-poetry.org | python3 -
+      export PATH="/home/${vm_username}/.local/bin:$PATH"
+
+      # Install dependencies
+      poetry install
+
+      # Run the training script on single GPU
+      # poetry run python src/single_gpu.py
+
+runcmd:
+  - sudo chown -R ${vm_username}:${vm_username} /home/${vm_username}
+  - sudo mkdir -p /mnt/filesystem
+  - sudo mount -t virtiofs ${fs_device_name} /mnt/filesystem
+  - >-
+      echo ${fs_device_name} /mnt/filesystem
+      "virtiofs" "defaults" "0" "2" | sudo tee -a /etc/fstab
+  - su - ${vm_username} -c "bash /home/${vm_username}/setup_and_run.sh"

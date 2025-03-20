@@ -1,0 +1,87 @@
+users:
+ - name: ${vm_username}
+   sudo: ALL=(ALL) NOPASSWD:ALL
+   shell: /bin/bash
+   ssh_authorized_keys:
+    - ${ssh_public_key}
+
+write_files:
+  - path: /home/${vm_username}/setup_and_run.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+
+      # Add error handling
+      set -e
+
+      # Function to check master node availability
+      check_master() {
+        local master_ip=$1
+        local max_attempts=30
+        local attempt=1
+
+        while [ $attempt -le $max_attempts ]; do
+          if nc -z $master_ip 29500; then
+            return 0
+          fi
+          echo "Attempt $attempt: Waiting for master node..."
+          sleep 10
+          attempt=$((attempt + 1))
+        done
+        return 1
+      }
+
+      cd /home/${vm_username}
+
+      # Create necessary directories with proper permissions
+      mkdir -p /home/${vm_username}/.local/bin
+      mkdir -p /home/${vm_username}/.local/share/pypoetry
+
+      # Clone the repository
+      git clone https://github.com/erfanMhi/distributed_training.git
+      cd distributed_training
+
+      # Install Poetry
+      curl -sSL https://install.python-poetry.org | python3 -
+      export PATH="/home/${vm_username}/.local/bin:$PATH"
+
+      # Install dependencies
+      poetry install
+
+      if [ "${instance_index}" != "0" ]; then
+        if ! check_master ${master_ip}; then
+          echo "Failed to connect to master node after multiple attempts"
+          exit 1
+        fi
+      fi
+
+      # Only the first instance (master) should initiate the training
+      if [ "${instance_index}" == "0" ]; then
+        # Start the training on master node
+        poetry run torchrun \
+          --nnodes=${cluster_size} \
+          --node_rank=0 \
+          --master_addr=$(hostname -i) \
+          --master_port=29500 \
+          --nproc_per_node=8 \
+          src/multigpu_multi_node.py
+      else
+        # Wait for master node to be ready and join the training
+        sleep 30  # Give master node time to start
+        poetry run torchrun \
+          --nnodes=${cluster_size} \
+          --node_rank=${instance_index} \
+          --master_addr=${master_ip} \
+          --master_port=29500 \
+          --nproc_per_node=8 \
+          src/multigpu_multi_node.py
+      fi
+
+runcmd:
+  - sudo chown -R ${vm_username}:${vm_username} /home/${vm_username}
+  - sudo mkdir -p /mnt/filesystem
+  - sudo mount -t virtiofs ${fs_device_name} /mnt/filesystem
+  - >-
+      echo ${fs_device_name} /mnt/filesystem
+      "virtiofs" "defaults" "0" "2" | sudo tee -a /etc/fstab
+  - su - ${vm_username} -c "bash /home/${vm_username}/setup_and_run.sh"

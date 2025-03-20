@@ -1,0 +1,10 @@
+# Replace these values with your actual credentials
+# Do NOT commit the actual terraform.tfvars file to git
+
+# Nebius AI credentials
+tenant_id     = "your-tenant-id-here"
+project_id    = "your-project-id-here"
+
+# VM access configuration
+vm_username   = "your-username"  # e.g., "user"
+vm_ssh_public_key_path = "~/.ssh/id_ed25519.pub"  # Path to your SSH public key

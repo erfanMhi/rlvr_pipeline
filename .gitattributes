@@ -1,0 +1,15 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Denote files that should never be modified
+*.tfstate binary
+*.tfstate.* binary
+
+# Mark as linguist-generated so GitHub doesn't count them in language stats
+*.tfstate linguist-generated=true
+*.tfstate.backup linguist-generated=true
+.terraform/* linguist-generated=true
+
+# Explicitly mark example files as text to avoid issues
+*.tfvars.example text
+*.tf.example text

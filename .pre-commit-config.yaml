@@ -1,0 +1,20 @@
+# .pre-commit-config.yaml
+repos:
+  # Include standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0  # Use the latest version
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
+  # Add your custom hook as a local hook
+  - repo: local
+    hooks:
+      - id: terraform-security-check
+        name: Terraform Security Check
+        description: Check for sensitive Terraform files and credentials
+        entry: infrastructure/hooks/pre-commit-hook.sh
+        language: script
+        pass_filenames: false  # Your script already uses git diff

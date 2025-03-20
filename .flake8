@@ -1,0 +1,16 @@
+[flake8]
+max-line-length = 79
+extend-ignore = E203,D100,D101,D102,D103,D104,D105,D106,D107,ANN204,ANN201
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    *.egg-info
+per-file-ignores =
+    __init__.py:F401
+max-complexity = 10
+docstring-convention = google
+import-order-style = pep8
+application-import-names = src
+inline-quotes = double

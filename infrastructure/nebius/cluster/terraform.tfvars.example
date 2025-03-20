@@ -1,0 +1,11 @@
+# Example configuration - replace with your own values
+# DO NOT commit your actual terraform.tfvars file to version control
+
+# Nebius Cloud authentication
+tenant_id     = "your-tenant-id-here"
+project_id    = "your-project-id-here"
+
+# Cluster configuration
+vm_username            = "username"
+vm_ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+cluster_size           = 2 # Number of nodes in the GPU cluster
