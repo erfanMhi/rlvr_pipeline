@@ -61,3 +61,88 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## ⭐ Support
 
 If you find this template useful, please consider giving it a star!
+
+# GSM8K GRPO Training
+
+This repository contains modularized code for training language models on the GSM8K dataset using the GRPO (Generative Reward in Policy Optimization) approach.
+
+## Features
+
+- Fine-tuning LLMs on math reasoning tasks using GRPO
+- Modular design following PEP8 standards
+- Poetry for dependency management
+- Support for various model architectures
+- Custom reward functions targeting math reasoning
+- Inference capabilities for testing trained models
+
+## Installation
+
+This project uses Poetry for dependency management:
+
+```bash
+# Install poetry if you don't have it already
+curl -sSL https://install.python-poetry.org | python3 -
+
+# Install dependencies
+poetry install
+```
+
+## Project Structure
+
+- `src/`: Main package
+  - `model.py`: Model initialization and LoRA configuration
+  - `data.py`: Dataset loading and processing
+  - `rewards.py`: Reward functions for GRPO
+  - `config.py`: Training configuration and constants
+  - `inference.py`: Inference utilities 
+  - `train.py`: Main training logic
+
+- `train_gsm8k.py`: Command-line script to run training
+- `inference.py`: Command-line script to run inference
+
+## Usage
+
+### Training
+
+To train a model with default parameters:
+
+```bash
+poetry run python train_gsm8k.py
+```
+
+With custom parameters:
+
+```bash
+poetry run python train_gsm8k.py \
+  --model_name "unsloth/gemma-3-4b-it-unsloth-bnb-4bit" \
+  --max_seq_length 2048 \
+  --load_in_4bit \
+  --output_dir "outputs/gemma-4b" \
+  --save_model_path "gemma-4b" \
+  --run_inference
+```
+
+### Inference
+
+To run inference with a trained model:
+
+```bash
+poetry run python inference.py \
+  --model_path "gemma-3" \
+  --query "Janet's ducks lay 16 eggs per day. She eats 3 for breakfast every morning and bakes muffins for her friends every day with 4 eggs. How many eggs does she have left each day?" \
+  --max_new_tokens 256
+```
+
+## Customization
+
+You can customize various aspects of the training:
+
+- Model architecture by changing the `model_name` parameter
+- LoRA parameters in `model.py`
+- Reward functions in `rewards.py` 
+- Training configuration in `config.py`
+- System prompt and reasoning markers in `config.py`
+
+## License
+
+See the LICENSE file for more information.
