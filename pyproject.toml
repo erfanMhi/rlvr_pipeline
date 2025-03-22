@@ -13,6 +13,8 @@ python = ">=3.10, <3.13"
 unsloth = "2025.3.17"
 vllm = "0.8.1"
 jupyter = "*"
+transformers = {git = "https://github.com/huggingface/transformers", rev = "v4.49.0-Gemma-3"}
+wandb = "*"
 
 [tool.black]
 line-length = 79
