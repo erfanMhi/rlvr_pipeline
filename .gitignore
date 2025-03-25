@@ -188,3 +188,14 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# VS Code specific
+.vscode/
+
+# ML / Experiment Specific
+wandb/
+unsloth_compiled_cache/
+outputs/
+nohup*.out
+shutdown_log.txt
+gemma-3/*
