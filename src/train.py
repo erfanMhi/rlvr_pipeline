@@ -52,9 +52,11 @@ def train(
 
     # Initialize wandb
     import wandb
+
     wandb.init(project=wandb_project)
-    
+
     from trl import GRPOConfig, GRPOTrainer
+
     # Initialize model and tokenizer
     model, tokenizer = initialize_model(
         model_name=model_name,
