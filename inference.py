@@ -15,14 +15,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model_path",
         type=str,
-        default="gemma-3",
+        default="/home/user/test_code_generation_models/outputs/checkpoint-50",
         help="Path to the trained model",
     )
 
     parser.add_argument(
         "--query",
         type=str,
-        default="What is the sqrt of 101?",
+        default="If a train travels at 120 km/h and another train travels at 180 km/h in the opposite direction, how long will it take for them to be 450 km apart if they start at the same location?",
         help="The math problem to solve",
     )
 

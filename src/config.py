@@ -52,6 +52,7 @@ def get_training_config(
     Returns:
         Dictionary with training parameters
     """
+    num_generations = 32
     return {
         "learning_rate": 5e-6,
         "adam_beta1": 0.9,
@@ -61,14 +62,14 @@ def get_training_config(
         "lr_scheduler_type": "cosine",
         "optim": "adamw_torch_fused",
         "logging_steps": 1,
-        "per_device_train_batch_size": 1,
+        "per_device_train_batch_size": num_generations,
         "gradient_accumulation_steps": 1,
-        "num_generations": 32,
+        "num_generations": num_generations,
         "max_prompt_length": max_prompt_length,
         "max_completion_length": max_seq_length - max_prompt_length,
-        "max_steps": 500,
+        "max_steps": 1000,
         "save_steps": 50,
         "max_grad_norm": 0.1,
-        "report_to": "none",
+        "report_to": "all",
         "output_dir": "outputs",
     }

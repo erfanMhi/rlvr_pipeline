@@ -60,10 +60,10 @@ def match_format_approximately(
         response = completion[0]["content"]
         # Count how many keywords are seen - we penalize if too many!
         # If we see 1, then plus some points!
-        score += 0.5 if response.count(reasoning_start) == 1.0 else -0.5
-        score += 0.5 if response.count(reasoning_end) == 1.0 else -0.5
-        score += 0.5 if response.count(solution_start) == 1.0 else -0.5
-        score += 0.5 if response.count(solution_end) == 1.0 else -0.5
+        score += 0.5 if response.count(reasoning_start) == 1 else -0.5
+        score += 0.5 if response.count(reasoning_end) == 1 else -0.5
+        score += 0.5 if response.count(solution_start) == 1 else -0.5
+        score += 0.5 if response.count(solution_end) == 1 else -0.5
         scores.append(score)
     return scores
 

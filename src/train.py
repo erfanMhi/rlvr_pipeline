@@ -1,7 +1,6 @@
 """Main script for GRPO training on GSM8K dataset."""
 
 import torch
-from trl import GRPOConfig, GRPOTrainer
 
 from src.config import (
     get_reasoning_markers,
@@ -32,6 +31,8 @@ def train(
     full_finetuning: bool = False,
     output_dir: str = "outputs",
     save_model_path: str = "gemma-3",
+    log_completions: bool = True,
+    wandb_project: str = "gsm8k-grpo",
 ) -> None:
     """
     Train a model using GRPO on the GSM8K dataset.
@@ -45,7 +46,15 @@ def train(
         full_finetuning: Whether to do full finetuning
         output_dir: Directory to save training outputs
         save_model_path: Path to save the final model
+        log_completions: Whether to log completions to wandb
+        wandb_project: Name of the wandb project
     """
+
+    # Initialize wandb
+    import wandb
+    wandb.init(project=wandb_project)
+    
+    from trl import GRPOConfig, GRPOTrainer
     # Initialize model and tokenizer
     model, tokenizer = initialize_model(
         model_name=model_name,
@@ -75,6 +84,8 @@ def train(
         max_seq_length=max_seq_length,
     )
     training_config["output_dir"] = output_dir
+    training_config["log_completions"] = log_completions
+    training_config["report_to"] = ["wandb"]
     training_args = GRPOConfig(**training_config)
 
     # Initialize reward functions with the correct patterns and markers
@@ -107,6 +118,9 @@ def train(
 
     # Save the model
     save_model(model, tokenizer, save_model_path)
+
+    # Finish wandb run
+    wandb.finish()
 
     print(f"Model successfully trained and saved to {save_model_path}")
 
