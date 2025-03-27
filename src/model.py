@@ -31,6 +31,7 @@ def initialize_model(
         load_in_4bit=load_in_4bit,
         load_in_8bit=load_in_8bit,
         full_finetuning=full_finetuning,
+        attn_implementation="flash_attention_2",
     )
     return model, tokenizer
 

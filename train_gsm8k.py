@@ -83,6 +83,19 @@ def parse_args() -> argparse.Namespace:
         help="Query to test during inference",
     )
 
+    parser.add_argument(
+        "--eval_max_new_tokens",
+        type=int,
+        default=256,
+        help="Max new tokens for eval generation steps",
+    )
+
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable PyTorch Profiler for training and evaluation steps.",
+    )
+
     return parser.parse_args()
 
 
@@ -99,6 +112,8 @@ if __name__ == "__main__":
         full_finetuning=args.full_finetuning,
         output_dir=args.output_dir,
         save_model_path=args.save_model_path,
+        eval_max_new_tokens=args.eval_max_new_tokens,
+        profile=args.profile,
     )
 
     # Run inference if requested
