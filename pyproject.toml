@@ -15,6 +15,13 @@ vllm = "0.8.1"
 jupyter = "*"
 transformers = {git = "https://github.com/huggingface/transformers", rev = "v4.49.0-Gemma-3"}
 wandb = "*"
+datasets = "*"
+evaluate = "*"
+torch = "^2.6.0"
+torchvision = "^0.21.0"
+torchaudio = "^2.6.0"
+tensorboard = "^2.19.0"
+torch-tb-profiler = "^0.4.3"
 
 [tool.black]
 line-length = 79
@@ -33,9 +40,11 @@ force_grid_wrap = 0
 use_parentheses = true
 ensure_newline_before_comments = true
 line_length = 79
+known_first_party = ["src"]
+known_third_party = ["wandb", "torch", "transformers", "trl"]
 
 [tool.poetry.group.dev.dependencies]
-black = "^24.10.0"
+black = {extras = ["jupyter"], version = "^25.1.0"}
 flake8 = "^7.1.1"
 flake8-docstrings = "^1.7.0"
 flake8-import-order = "^0.18.2"
