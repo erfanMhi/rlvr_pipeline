@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.profiler as profiler
+import wandb
 from transformers import (
     TrainerCallback,
     TrainerControl,
@@ -12,7 +13,6 @@ from transformers import (
     TrainingArguments,
 )
 
-import wandb
 from src.config import (
     get_reasoning_markers,
     get_system_prompt,
