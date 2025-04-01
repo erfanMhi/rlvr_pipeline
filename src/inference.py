@@ -71,7 +71,6 @@ def generate_response(
     )
 
     if not stream:
-        return tokenizer.decode(
-            output[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
-        )
+        output_tokens = output[0][inputs.input_ids.shape[1] :]
+        return tokenizer.decode(output_tokens, skip_special_tokens=True)
     return None
