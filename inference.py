@@ -22,7 +22,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--query",
         type=str,
-        default="If a train travels at 120 km/h and another train travels at 180 km/h in the opposite direction, how long will it take for them to be 450 km apart if they start at the same location?",
+        default="If a train travels at 120 km/h and another train travels at "
+        "180 km/h in the opposite direction, how long will it take for them to"
+        " be 450 km apart if they start at the same location?",
         help="The math problem to solve",
     )
 
