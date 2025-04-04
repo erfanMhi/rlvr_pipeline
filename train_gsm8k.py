@@ -2,123 +2,46 @@
 """
 Entry point for training a model on the GSM8K dataset with GRPO.
 
-This script provides a command-line interface to run training with
-configurable parameters.
+This script uses Hydra for configuration management.
 """
 
-import argparse
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 from src.train import inference_demo, train
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Train a model on GSM8K using GRPO"
-    )
-
-    parser.add_argument(
-        "--model_name",
-        type=str,
-        default="unsloth/gemma-3-1b-it",
-        help="Name or path of the model to fine-tune",
-    )
-
-    parser.add_argument(
-        "--max_seq_length",
-        type=int,
-        default=1024,
-        help="Maximum sequence length",
-    )
-
-    parser.add_argument(
-        "--max_prompt_length",
-        type=int,
-        default=256,
-        help="Maximum prompt length",
-    )
-
-    parser.add_argument(
-        "--load_in_4bit",
-        action="store_true",
-        help="Load model in 4-bit quantization",
-    )
-
-    parser.add_argument(
-        "--load_in_8bit",
-        action="store_true",
-        help="Load model in 8-bit quantization",
-    )
-
-    parser.add_argument(
-        "--full_finetuning",
-        action="store_true",
-        help="Perform full model finetuning",
-    )
-
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="outputs",
-        help="Directory to save training outputs",
-    )
-
-    parser.add_argument(
-        "--save_model_path",
-        type=str,
-        default="gemma-3",
-        help="Path to save the final model",
-    )
-
-    parser.add_argument(
-        "--run_inference",
-        action="store_true",
-        help="Run inference demo after training",
-    )
-
-    parser.add_argument(
-        "--inference_query",
-        type=str,
-        default="What is the sqrt of 101?",
-        help="Query to test during inference",
-    )
-
-    parser.add_argument(
-        "--eval_max_new_tokens",
-        type=int,
-        default=256,
-        help="Max new tokens for eval generation steps",
-    )
-
-    parser.add_argument(
-        "--profile",
-        action="store_true",
-        help="Enable PyTorch Profiler for training and evaluation steps.",
-    )
-
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    args = parse_args()
+@hydra.main(config_path="conf", config_name="config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    """Main training and optional inference function driven by Hydra config."""
+    print(OmegaConf.to_yaml(cfg))
 
     # Run training
+    # Note: The 'train' function needs to handle saving the model to
+    # cfg.training.save_model_name within the Hydra run directory.
+    # Hydra automatically changes the CWD to the run output directory.
     train(
-        model_name=args.model_name,
-        max_seq_length=args.max_seq_length,
-        max_prompt_length=args.max_prompt_length,
-        load_in_4bit=args.load_in_4bit,
-        load_in_8bit=args.load_in_8bit,
-        full_finetuning=args.full_finetuning,
-        output_dir=args.output_dir,
-        save_model_path=args.save_model_path,
-        eval_max_new_tokens=args.eval_max_new_tokens,
-        profile=args.profile,
+        model_name=cfg.model.name,
+        max_seq_length=cfg.model.max_seq_length,
+        max_prompt_length=cfg.model.max_prompt_length,
+        load_in_4bit=cfg.model.load_in_4bit,
+        load_in_8bit=cfg.model.load_in_8bit,
+        full_finetuning=cfg.training.full_finetuning,
+        output_dir=cfg.training.output_dir,  # Pass base output dir if needed
+        save_model_path=cfg.training.save_model_name,  # Now just the name
+        eval_max_new_tokens=cfg.evaluation.max_new_tokens,
+        profile=cfg.training.profile,
     )
 
     # Run inference if requested
-    if args.run_inference:
+    if cfg.inference.run:
+        # Assuming inference_demo loads the model from the path saved by train
+        # which should be cfg.training.save_model_name relative to CWD.
         inference_demo(
-            model_path=args.save_model_path,
-            query=args.inference_query,
+            model_path=cfg.training.save_model_name,
+            query=cfg.inference.query,
         )
+
+
+if __name__ == "__main__":
+    main()

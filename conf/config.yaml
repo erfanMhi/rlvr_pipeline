@@ -1,0 +1,32 @@
+defaults:
+  - _self_
+
+model:
+  name: unsloth/gemma-3-1b-it
+  max_seq_length: 1024
+  max_prompt_length: 256
+  load_in_4bit: false
+  load_in_8bit: false
+
+training:
+  full_finetuning: false
+  output_dir: outputs # Base directory for outputs managed by hydra
+  save_model_name: gemma-3 # Name for the saved model folder within the hydra run dir
+  profile: false
+
+evaluation:
+  max_new_tokens: 256
+
+inference:
+  run: false
+  query: "What is the sqrt of 101?"
+
+# Hydra settings
+hydra:
+  run:
+    # Hydra's default output subdir pattern: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    # We'll use the output_dir from the training config as the base
+    dir: ${training.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${training.output_dir}/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.num} 

@@ -17,11 +17,13 @@ transformers = {git = "https://github.com/huggingface/transformers", rev = "v4.4
 wandb = "*"
 datasets = "*"
 evaluate = "*"
+hydra-core = "*"
 torch = "^2.6.0"
 torchvision = "^0.21.0"
 torchaudio = "^2.6.0"
 tensorboard = "^2.19.0"
 torch-tb-profiler = "^0.4.3"
+omegaconf = "^2.3.0"
 
 [tool.black]
 line-length = 79
