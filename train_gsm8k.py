@@ -31,6 +31,7 @@ def main(cfg: DictConfig) -> None:
         save_model_path=cfg.training.save_model_name,  # Now just the name
         eval_max_new_tokens=cfg.evaluation.max_new_tokens,
         profile=cfg.training.profile,
+        evaluation_enabled=cfg.evaluation.enabled,  # Pass the toggle
     )
 
     # Run inference if requested

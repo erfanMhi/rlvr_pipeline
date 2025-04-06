@@ -15,6 +15,7 @@ training:
   profile: false
 
 evaluation:
+  enabled: false  # Toggle evaluation callback on/off
   max_new_tokens: 256
 
 inference:

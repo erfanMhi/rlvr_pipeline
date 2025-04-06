@@ -169,6 +169,7 @@ def train(
     eval_batch_size: int = 512,
     eval_max_new_tokens: int = 2048,
     profile: bool = False,
+    evaluation_enabled: bool = True,
 ) -> None:
     """Train a model using GRPO on the GSM8K dataset.
 
@@ -189,6 +190,7 @@ def train(
         eval_batch_size: Batch size for evaluation inference.
         eval_max_new_tokens: Max new tokens for eval generation.
         profile: Whether to enable PyTorch Profiler.
+        evaluation_enabled: Whether to enable evaluation callback during training.
     """
     # Initialize wandb
     wandb.init(project=wandb_project)
@@ -245,27 +247,29 @@ def train(
     ]
 
     # Initialize Evaluation Callback
-    evaluation_callback = EvaluationCallback(
-        eval_datasets=eval_datasets,
-        eval_steps=eval_steps,
-        system_prompt=system_prompt,
-        markers=markers,
-        tokenizer=tokenizer,
-        eval_max_new_tokens=eval_max_new_tokens,
-        eval_num_samples=eval_num_samples,
-        eval_batch_size=eval_batch_size,
-        profile=profile,
-    )
+    callbacks = []
+    if evaluation_enabled:
+        evaluation_callback = EvaluationCallback(
+            eval_datasets=eval_datasets,
+            eval_steps=eval_steps,
+            system_prompt=system_prompt,
+            markers=markers,
+            tokenizer=tokenizer,
+            eval_max_new_tokens=eval_max_new_tokens,
+            eval_num_samples=eval_num_samples,
+            eval_batch_size=eval_batch_size,
+            profile=profile,
+        )
+        callbacks.append(evaluation_callback)
 
     # Initialize trainer
     trainer = GRPOTrainer(
         model=model,
-        # GRPOTrainer uses tokenizer directly, not processing_class
-        tokenizer=tokenizer,  # Changed from processing_class
+        tokenizer=tokenizer,
         reward_funcs=reward_functions,
         args=training_args,
         train_dataset=formatted_dataset,
-        callbacks=[evaluation_callback],  # Added callback
+        callbacks=callbacks,
     )
 
     # Train the model
