@@ -24,6 +24,9 @@ torchaudio = "^2.6.0"
 tensorboard = "^2.19.0"
 torch-tb-profiler = "^0.4.3"
 omegaconf = "^2.3.0"
+nvtx = "^0.2.11"
+pyyaml = "^6.0.2"
+jinja2 = "^3.1.6"
 
 [tool.black]
 line-length = 79
