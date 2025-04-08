@@ -8,26 +8,60 @@ model:
   load_in_4bit: false
   load_in_8bit: false
 
+data:
+  train_dataset_name: gsm8k
+  eval_datasets: ["svamp", "gsm8k"]
+
+optimizer:
+  name: adamw_torch_fused
+  learning_rate: 5.0e-6
+  adam_beta1: 0.9
+  adam_beta2: 0.99
+  weight_decay: 0.1
+
 training:
   full_finetuning: false
-  output_dir: outputs # Base directory for outputs managed by hydra
-  save_model_name: gemma-3 # Name for the saved model folder within the hydra run dir
+  # output_dir is managed by Hydra's hydra.run.dir setting below
+  # This key is kept for compatibility if some part of the code still expects it,
+  # but the primary output location is determined by hydra.run.dir.
+  output_dir: outputs 
+  save_model_name: gemma-3 # Name for the final saved model folder (relative to hydra run dir)
+  trainer_internal_output_dir: "trainer_checkpoints" # Subdir for trainer's own checkpoints
   profile: false
+  warmup_ratio: 0.1
+  lr_scheduler_type: cosine
+  logging_steps: 1
+  per_device_train_batch_size: 16
+  gradient_accumulation_steps: 1
+  max_steps: 50 # Consider increasing for actual runs
+  save_steps: 50
+  max_grad_norm: 0.1
+  report_to: ["wandb"]
+  log_completions_to_wandb: true # For GRPOConfig
+
+grpo:
+  num_generations: 16
 
 evaluation:
-  enabled: false  # Toggle evaluation callback on/off
-  max_new_tokens: 256
+  enabled: true
+  steps: 100
+  num_samples: null # null for all samples
+  batch_size: 512
+  max_new_tokens: 256 # This was already here
 
-inference:
-  run: false
-  query: "What is the sqrt of 101?"
+wandb:
+  project: gsm8k-grpo
 
 # Hydra settings
 hydra:
   run:
     # Hydra's default output subdir pattern: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    # We'll use the output_dir from the training config as the base
+    # base_output_dir below can be used to change the "outputs" part if needed.
     dir: ${training.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
   sweep:
     dir: ${training.output_dir}/multirun/${now:%Y-%m-%d_%H-%M-%S}
-    subdir: ${hydra.job.num} 
+    subdir: ${hydra.job.num}
+
+inference:
+  run: false
+  query: "What is the sqrt of 101?" 

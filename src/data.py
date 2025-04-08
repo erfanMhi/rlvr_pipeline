@@ -1,68 +1,10 @@
 """Data loading and processing for GSM8K dataset."""
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Union
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Type, Union
 
-from datasets import load_dataset  # type: ignore
-
-
-def load_gsm8k_dataset(split: str = "train") -> Any:
-    """
-    Load the GSM8K dataset.
-
-    Args:
-        split: Dataset split to load
-
-    Returns:
-        The dataset object
-    """
-    return load_dataset("openai/gsm8k", "main", split=split)
-
-
-def load_math_dataset(split: str = "test") -> Any:
-    """
-    Load the MATH dataset (competition math).
-
-    Args:
-        split: Dataset split to load (only 'test' and 'train' available)
-
-    Returns:
-        The dataset object
-    """
-    # Note: The MATH dataset is large.
-    # Consider streaming or subsampling if needed.
-    # MATH is unavailable due to DMCA takedown.
-    # return load_dataset("hendrycks/math", split=split)
-    raise NotImplementedError(
-        "The hendrycks/math dataset is currently unavailable on Hugging Face "
-        "Hub. Consider using SVAMP or another dataset."
-    )
-
-
-def load_svamp_dataset(split: str = "test") -> Any:
-    """
-    Load the SVAMP dataset.
-
-    Args:
-        split: Dataset split to load (only 'test' and 'train' available).
-
-    Returns:
-        The dataset object.
-    """
-    # Check Hugging Face Hub for the exact name if this doesn't work,
-    # common names are ChilleD/SVAMP or svamp
-    try:
-        return load_dataset("ChilleD/SVAMP", split=split)
-    except Exception as e:
-        print(f"Could not load ChilleD/SVAMP: {e}. Trying 'svamp'...")
-        try:
-            # Fallback in case the canonical name changes or is just 'svamp'
-            return load_dataset("svamp", split=split)
-        except Exception as e2:
-            raise ValueError(
-                "Could not load SVAMP dataset using 'ChilleD/SVAMP' "
-                "or 'svamp' names."
-            ) from e2
+from datasets import Features, Sequence, Value, load_dataset  # type: ignore
 
 
 def extract_hash_answer(text: str) -> Optional[str]:
@@ -96,7 +38,9 @@ def extract_boxed_answer(text: str) -> Optional[str]:
     return None
 
 
-def extract_svamp_answer(answer_value: Union[int, float]) -> Optional[str]:
+def extract_svamp_answer_from_field(
+    answer_value: Union[int, float],
+) -> Optional[str]:
     """
     Extract/format the answer from the SVAMP dataset's 'Answer' field.
 
@@ -120,6 +64,7 @@ def extract_solution_marker_answer(
     """Extract the answer from between solution markers.
 
     (e.g., <SOLUTION>...</SOLUTION>).
+    This is typically for model generated output.
 
     Args:
         text: Text possibly containing the answer within markers.
@@ -144,119 +89,224 @@ def extract_solution_marker_answer(
     return match.group(1).strip() if match else None
 
 
-# --- Helper functions for create_prompt_format ---
+class AbstractDatasetProcessor(ABC):
+    """Abstract base class for dataset processing."""
 
+    @abstractmethod
+    def load_raw_dataset(self, split: str = "train") -> Any:
+        """Loads the raw dataset from its source."""
+        pass
 
-def _get_gsm8k_question(example: Dict[str, str]) -> str:
-    """Extracts the question from a GSM8K example."""
-    return example["question"]
+    @abstractmethod
+    def get_question_text(self, example: Dict[str, Any]) -> str:
+        """Extracts the question text from a raw dataset example."""
+        pass
 
+    @abstractmethod
+    def extract_ground_truth_answer_from_example(
+        self, example: Dict[str, Any]
+    ) -> Optional[str]:
+        """Extracts the ground truth answer from a raw dataset example."""
+        pass
 
-def _get_gsm8k_answer(answer_text: Any) -> Optional[str]:
-    """Extracts the answer from GSM8K answer text."""
-    # GSM8K answer extractor expects string input
-    return extract_hash_answer(str(answer_text))
+    def format_single_example_for_model(
+        self, system_prompt: str, example: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Formats a single raw example into the required structure for the model.
 
-
-def _get_math_question(example: Dict[str, str]) -> str:
-    """Extracts the problem text from a MATH example."""
-    return example["problem"]
-
-
-def _get_math_answer(solution_text: Any) -> Optional[str]:
-    """Extracts the answer from MATH solution text."""
-    # MATH answer extractor expects string input
-    return extract_boxed_answer(str(solution_text))
-
-
-def _get_svamp_question(example: Dict[str, Any]) -> str:
-    """Combines Body and Question for a SVAMP example."""
-    return f"{example['Body']}\nQuestion: {example['Question']}"
-
-
-# ----------------------------------------------
-
-
-def create_prompt_format(
-    system_prompt: str, reasoning_markers: Dict[str, str], dataset: Any
-) -> Any:
-    """Format the dataset with prompts and extracted answers.
-
-    Handles GSM8K ('question', 'answer'), MATH ('problem', 'solution'),
-    and SVAMP ('Body' + 'Question', 'Answer') formats.
-
-    Args:
-        system_prompt: System prompt to use.
-        reasoning_markers: Dict of markers for reasoning/solution sections
-        dataset: The dataset to format
-
-    Returns:
-        The formatted dataset
-    """
-    # Determine dataset type based on columns
-    cols = dataset.column_names
-    question_col_data: Callable[[Dict[str, Any]], str]
-    answer_extractor: Callable[[Any], Optional[str]]
-    answer_col: str
-
-    if "question" in cols and "answer" in cols and "Body" not in cols:  # GSM8K
-        question_col_data = _get_gsm8k_question
-        answer_col = "answer"
-        answer_extractor = _get_gsm8k_answer
-    elif (
-        "problem" in cols and "solution" in cols
-    ):  # MATH (currently unavailable)
-        question_col_data = _get_math_question
-        answer_col = "solution"
-        answer_extractor = _get_math_answer
-    elif "Body" in cols and "Question" in cols and "Answer" in cols:  # SVAMP
-        question_col_data = _get_svamp_question
-        answer_col = "Answer"
-        answer_extractor = extract_svamp_answer
-    else:
-        raise ValueError(
-            "Dataset columns do not match expected GSM8K, MATH, or SVAMP "
-            f"formats. Found columns: {cols}"
+        This includes the extracted ground truth answer.
+        Returns None if the answer cannot be extracted.
+        """
+        question_text = self.get_question_text(example)
+        ground_truth_answer = self.extract_ground_truth_answer_from_example(
+            example
         )
 
-    def format_example(
-        example: Dict[str, Any],
-    ) -> Dict[str, Union[List, str, None]]:
-        """Helper to format a single example."""
-        # Handle potential None values in the answer column if any
-        raw_answer_data = example.get(answer_col)
-        extracted_answer = (
-            answer_extractor(raw_answer_data)
-            if raw_answer_data is not None
-            else None
-        )
-        # Get the question/problem text using the determined function
-        question_text = question_col_data(example)
+        if ground_truth_answer is None:
+            return None
 
         return {
             "prompt": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question_text},
             ],
-            "answer": extracted_answer,
+            "answer": ground_truth_answer,
         }
 
-    # Remove examples where the answer could not be extracted
-    # for training/evaluation
-    original_count = len(dataset)
-    formatted_dataset = dataset.map(format_example)
-    # Filter out null answers AFTER mapping to ensure consistency
-    filtered_dataset = formatted_dataset.filter(
-        lambda x: x["answer"] is not None
-    )
-    filtered_count = len(filtered_dataset)
-    if filtered_count < original_count:
-        print(
-            f"Filtered out {original_count - filtered_count} examples"
-            " with unextractable/invalid answers."
+    def create_formatted_dataset(
+        self, system_prompt: str, split: str = "train"
+    ) -> Any:
+        """
+        LTE the dataset for model training/evaluation.
+
+        Filters out examples where the answer could not be extracted.
+        """
+        raw_dataset = self.load_raw_dataset(split=split)
+
+        original_count = len(raw_dataset)
+
+        # Using a list comprehension and then converting to dataset to handle
+        # filtering and avoid issues with map and filter on dataset objects
+        # directly with Nones
+        processed_examples = []
+        for example in raw_dataset:
+            formatted_example = self.format_single_example_for_model(
+                system_prompt, example
+            )
+            if formatted_example:
+                processed_examples.append(formatted_example)
+
+        # Re-create a Hugging Face Dataset from the list of dictionaries
+        # This requires knowing the features, which we can infer if all dicts
+        # have same keys
+        if not processed_examples:
+            # Or handle as an error, or return an empty dataset with
+            # defined features
+            print(
+                f"Warning: No processable examples found for "
+                f"{self.__class__.__name__} on split {split}."
+            )
+            # Attempt to return an empty dataset with expected structure.
+            # May need robust handling or explicit schema definition.
+            # `Dataset.from_list` handles empty lists or use empty list for
+            # caller.
+            # HF Trainer needs a HF Dataset object.
+            from datasets import Dataset  # Local import
+
+            # Create an empty dataset with a schema. Assumes specific
+            # prompt/answer structure.
+            # Better: dynamic creation, or ensure one valid example for
+            # schema inference.
+            # Empty `processed_examples` can cause issues if trainer needs
+            # non-empty dataset.
+            empty_features = Features(
+                {
+                    "prompt": Sequence(
+                        feature={
+                            "role": Value("string"),
+                            "content": Value("string"),
+                        }
+                    ),
+                    "answer": Value("string"),
+                }
+            )
+            formatted_dataset = Dataset.from_list([], features=empty_features)
+
+        else:
+            from datasets import Dataset  # Local import
+
+            formatted_dataset = Dataset.from_list(processed_examples)
+
+        filtered_count = len(formatted_dataset)
+        if filtered_count < original_count:
+            msg = (
+                f"Filtered out {original_count - filtered_count} examples"
+                f" from {self.__class__.__name__} on split {split} due to "
+                "unextractable/invalid answers."
+            )
+            print(msg)
+        return formatted_dataset
+
+
+class GSM8KDatasetProcessor(AbstractDatasetProcessor):
+    """Processor for the GSM8K dataset."""
+
+    def load_raw_dataset(self, split: str = "train") -> Any:
+        return load_dataset("openai/gsm8k", "main", split=split)
+
+    def get_question_text(self, example: Dict[str, Any]) -> str:
+        return example["question"]  # type: ignore
+
+    def extract_ground_truth_answer_from_example(
+        self, example: Dict[str, Any]
+    ) -> Optional[str]:
+        return extract_hash_answer(str(example.get("answer", "")))
+
+
+class SVAMPDatasetProcessor(AbstractDatasetProcessor):
+    """Processor for the SVAMP dataset."""
+
+    def load_raw_dataset(self, split: str = "test") -> Any:
+        try:
+            return load_dataset("ChilleD/SVAMP", split=split)
+        except Exception as e:
+            print(f"Could not load ChilleD/SVAMP: {e}. Trying 'svamp'...")
+            try:
+                return load_dataset("svamp", split=split)
+            except Exception as e2:
+                raise ValueError(
+                    "Could not load SVAMP dataset using 'ChilleD/SVAMP' "
+                    "or 'svamp' names."
+                ) from e2
+
+    def get_question_text(self, example: Dict[str, Any]) -> str:
+        return f"{example['Body']}\\nQuestion: {example['Question']}"
+
+    def extract_ground_truth_answer_from_example(
+        self, example: Dict[str, Any]
+    ) -> Optional[str]:
+        answer = example.get("Answer")
+        if isinstance(answer, (int, float)):
+            return extract_svamp_answer_from_field(answer)
+        return None
+
+
+class MATHDatasetProcessor(AbstractDatasetProcessor):
+    """Processor for the MATH dataset (currently unavailable)."""
+
+    def load_raw_dataset(self, split: str = "test") -> Any:
+        raise NotImplementedError(
+            "The hendrycks/math dataset is currently unavailable on "
+            "Hugging Face Hub. Consider using SVAMP or another dataset."
         )
 
-    return filtered_dataset
+    def get_question_text(self, example: Dict[str, Any]) -> str:
+        # Assuming 'problem' is the key for question text in MATH dataset
+        if "problem" not in example:
+            raise ValueError("MATH dataset example missing 'problem' field.")
+        return example["problem"]  # type: ignore
+
+    def extract_ground_truth_answer_from_example(
+        self, example: Dict[str, Any]
+    ) -> Optional[str]:
+        # Assuming 'solution' is the key for answer text in MATH dataset
+        if "solution" not in example:
+            # Or return None if this is acceptable
+            raise ValueError(
+                "MATH example missing 'solution' field for answer extraction."
+            )
+        return extract_boxed_answer(str(example["solution"]))
+
+
+DATASET_PROCESSORS: Dict[str, Type[AbstractDatasetProcessor]] = {
+    "gsm8k": GSM8KDatasetProcessor,
+    "svamp": SVAMPDatasetProcessor,
+    "math": MATHDatasetProcessor,
+}
+
+
+def get_dataset_processor(dataset_name: str) -> AbstractDatasetProcessor:
+    """
+    Factory function to get a dataset processor instance.
+
+    Args:
+        dataset_name: The name of the dataset.
+
+    Returns:
+        An instance of the appropriate dataset processor.
+
+    Raises:
+        ValueError: If the dataset_name is not supported.
+    """
+    processor_class = DATASET_PROCESSORS.get(dataset_name.lower())
+    if processor_class:
+        return processor_class()
+    msg = (
+        f"Unsupported dataset: {dataset_name}. "
+        f"Available: {list(DATASET_PROCESSORS.keys())}"
+    )
+    raise ValueError(msg)
 
 
 def create_regex_patterns(
@@ -265,27 +315,33 @@ def create_regex_patterns(
     """
     Create regex patterns for matching reasoning and solution sections.
 
+    This is generally independent of the input dataset's format and pertains
+    to the expected structure of a model's output.
+
     Args:
         reasoning_markers: Dictionary containing marker strings
 
     Returns:
         Dictionary of compiled regex patterns
     """
-    reasoning_start = reasoning_markers["reasoning_start"]
-    reasoning_end = reasoning_markers["reasoning_end"]
-    solution_start = reasoning_markers["solution_start"]
-    solution_end = reasoning_markers["solution_end"]
+    reasoning_start = re.escape(reasoning_markers["reasoning_start"])
+    reasoning_end = re.escape(reasoning_markers["reasoning_end"])
+    solution_start = re.escape(reasoning_markers["solution_start"])
+    solution_end = re.escape(reasoning_markers["solution_end"])
 
     format_pattern = re.compile(
-        rf"^[\s]{{0,}}"
+        rf"^[\\s]{{0,}}"
         rf"{reasoning_start}.+?{reasoning_end}.*?"
         rf"{solution_start}(.+?){solution_end}"
-        rf"[\s]{{0,}}$",
+        rf"[\\s]{{0,}}$",
         flags=re.MULTILINE | re.DOTALL,
     )
 
+    # Pattern to extract numbers from within the model's solution block.
+    # Specific to how answers are found in completions.
     numbers_pattern = re.compile(
-        rf"{solution_start}.*?([\d\.]{{1,}})", flags=re.MULTILINE | re.DOTALL
+        rf"{solution_start}[^\d]*([\d\.]+)",
+        flags=re.MULTILINE | re.DOTALL,
     )
 
     return {"format": format_pattern, "numbers": numbers_pattern}

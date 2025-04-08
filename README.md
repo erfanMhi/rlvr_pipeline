@@ -143,6 +143,15 @@ You can customize various aspects of the training:
 - Training configuration in `config.py`
 - System prompt and reasoning markers in `config.py`
 
+## Profiling and Optimization
+nsys profile \
+  --trace=cuda,nvtx,osrt,cudnn,cublas \
+  --cuda-memory-usage=true \
+  --output=nv_report.qdrep \
+  --force-overwrite=true \
+  --stats=true \
+  python main.py
+
 ## License
 
 See the LICENSE file for more information.

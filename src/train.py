@@ -1,5 +1,6 @@
 """Main script for GRPO training on GSM8K dataset."""
 
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -13,16 +14,8 @@ from transformers import (
     TrainingArguments,
 )
 
-from src.config import (
-    get_reasoning_markers,
-    get_system_prompt,
-    get_training_config,
-)
-from src.data import (
-    create_prompt_format,
-    create_regex_patterns,
-    load_gsm8k_dataset,
-)
+from src.config import generate_system_prompt_for_model, get_markers_for_model
+from src.data import create_regex_patterns, get_dataset_processor
 from src.evaluation import evaluate_model
 from src.inference import format_chat_prompt, generate_response
 from src.model import add_lora_adapters, initialize_model, save_model
@@ -33,22 +26,23 @@ from src.rewards import (
     match_format_exactly,
 )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 
 def get_trace_handler(phase: str) -> Any:
     """Creates a TensorBoard trace handler for a phase-specific subdir."""
-    # Define the base directory for all profiler logs
     base_trace_dir = "./profiler_logs"
-
-    # Create the specific subdirectory for this phase
     logdir = os.path.join(base_trace_dir, phase)
     os.makedirs(logdir, exist_ok=True)
-
-    # Split the print statement to avoid line length issue
-    print(
+    logger.info(
         f"Profiler trace handler configured for phase '{phase}' "
         f"writing to: {logdir}"
     )
-    # Return the TensorBoard handler
     return profiler.tensorboard_trace_handler(logdir)
 
 
@@ -87,7 +81,7 @@ class EvaluationCallback(TrainerCallback):
         if state.global_step == self._last_log_step:
             return
 
-        print(f"\n--- Evaluating at step {state.global_step} ---")
+        logger.info(f"\n--- Evaluating at step {state.global_step} ---")
         model.eval()
 
         for dataset_name in self.eval_datasets:
@@ -96,15 +90,50 @@ class EvaluationCallback(TrainerCallback):
                 phase = f"eval_{dataset_name}_step_{state.global_step}"
                 eval_trace_handler = get_trace_handler(phase)
 
+            # Get the appropriate dataset processor
+            try:
+                processor = get_dataset_processor(dataset_name)
+                # Prepare the evaluation dataset
+                # Assuming 'test' split for evaluation
+                eval_dataset = processor.create_formatted_dataset(
+                    system_prompt=self.system_prompt, split="test"
+                )
+                if (
+                    self.eval_num_samples is not None
+                    and self.eval_num_samples > 0
+                ):
+                    eval_dataset = eval_dataset.select(
+                        range(min(self.eval_num_samples, len(eval_dataset)))
+                    )
+
+            except ValueError as e:
+                error_msg = (
+                    f"Could not get processor for {dataset_name}: {e}. "
+                    f"Skipping."
+                )
+                logger.warning(error_msg)
+                continue
+            except NotImplementedError as e:
+                logger.warning(
+                    f"Dataset {dataset_name} not implemented: {e}. Skipping."
+                )
+                continue
+
+            if not eval_dataset or len(eval_dataset) == 0:
+                logger.info(
+                    f"No data for {dataset_name} at step "
+                    f"{state.global_step}. Skipping."
+                )
+                continue
+
             accuracy = evaluate_model(
                 model=model,
                 tokenizer=self.tokenizer,
-                dataset_name=dataset_name,
-                system_prompt=self.system_prompt,
+                dataset_name_for_logging=dataset_name,
+                eval_dataset=eval_dataset,
                 markers=self.markers,
                 max_new_tokens=self.eval_max_new_tokens,
                 eval_batch_size=self.eval_batch_size,
-                num_samples=self.eval_num_samples,
                 trace_handler=eval_trace_handler,
             )
             wandb.log(
@@ -112,7 +141,9 @@ class EvaluationCallback(TrainerCallback):
                 step=state.global_step,
             )
 
-        print(f"--- Evaluation finished for step {state.global_step} ---")
+        logger.info(
+            f"--- Evaluation finished for step {state.global_step} ---"
+        )
         model.train()
         self._last_log_step = state.global_step
 
@@ -123,12 +154,13 @@ class EvaluationCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs: Any,
     ) -> None:
-        """Evaluate at the beginning of training (step 0)."""
         model = kwargs.get("model")
         if model is not None:
             self._run_evaluation(args, state, model)
         else:
-            print("Warning: Model not found in kwargs for initial evaluation.")
+            logger.warning(
+                "Warning: Model not found in kwargs for initial evaluation."
+            )
 
     def on_step_end(
         self,
@@ -137,216 +169,330 @@ class EvaluationCallback(TrainerCallback):
         control: TrainerControl,
         **kwargs: Any,
     ) -> None:
-        """Evaluate every `eval_steps`."""
         if state.global_step > 0 and state.global_step % self.eval_steps == 0:
             model = kwargs.get("model")
             if model is not None:
                 self._run_evaluation(args, state, model)
             else:
-                print(
+                logger.warning(
                     f"Warning: Model not found in kwargs for eval at step "
                     f"{state.global_step}."
                 )
 
 
 def train(
-    model_name: str = "unsloth/gemma-3-1b-it",
-    max_seq_length: int = 1024,
-    max_prompt_length: int = 256,
-    load_in_4bit: bool = False,
-    load_in_8bit: bool = False,
-    full_finetuning: bool = False,
-    output_dir: str = "outputs",
-    save_model_path: str = "gemma-3",
-    log_completions: bool = True,
-    wandb_project: str = "gsm8k-grpo",
-    eval_steps: int = 100,
-    eval_datasets: List[str] = [
-        "svamp",
-        "gsm8k",
-    ],
-    eval_num_samples: Optional[int] = None,
-    eval_batch_size: int = 512,
-    eval_max_new_tokens: int = 2048,
-    profile: bool = False,
-    evaluation_enabled: bool = True,
+    # Model parameters
+    model_name: str,
+    max_seq_length: int,
+    max_prompt_length: int,
+    load_in_4bit: bool,
+    load_in_8bit: bool,
+    # Data parameters
+    training_dataset_name: str,
+    eval_datasets: List[str],
+    # Optimizer parameters
+    optim_name: str,
+    learning_rate: float,
+    adam_beta1: float,
+    adam_beta2: float,
+    weight_decay: float,
+    # Training parameters
+    full_finetuning: bool,
+    trainer_output_dir: str,
+    save_model_path: str,
+    profile: bool,
+    warmup_ratio: float,
+    lr_scheduler_type: str,
+    logging_steps: int,
+    per_device_train_batch_size: int,
+    gradient_accumulation_steps: int,
+    max_steps: int,
+    save_steps: int,
+    max_grad_norm: float,
+    report_to: List[str],
+    log_completions_to_wandb: bool,
+    # GRPO parameters
+    grpo_num_generations: int,
+    # Evaluation parameters
+    evaluation_enabled: bool,
+    eval_steps: int,
+    eval_num_samples: Optional[int],
+    eval_batch_size: int,
+    eval_max_new_tokens: int,
+    # Wandb parameters
+    wandb_project: str,
 ) -> None:
-    """Train a model using GRPO on the GSM8K dataset.
+    """Train a model using GRPO.
 
     Args:
-        model_name: Name of the model to fine-tune
-        max_seq_length: Maximum sequence length
-        max_prompt_length: Maximum prompt length
-        load_in_4bit: Whether to load in 4bit quantization
-        load_in_8bit: Whether to load in 8bit quantization
-        full_finetuning: Whether to do full finetuning
-        output_dir: Directory to save training outputs
-        save_model_path: Path to save the final model
-        log_completions: Whether to log completions to wandb
-        wandb_project: Name of the wandb project
+        model_name: Name of the model to fine-tune.
+        max_seq_length: Max sequence length for model and tokenizer.
+        max_prompt_length: Max prompt length for GRPO.
+        load_in_4bit: Whether to load in 4bit quantization.
+        load_in_8bit: Whether to load in 8bit quantization.
+        training_dataset_name: Name of the dataset for training.
+        eval_datasets: List of dataset names for evaluation.
+        optim_name: Optimizer name (e.g., 'adamw_torch_fused').
+        learning_rate: Learning rate for the optimizer.
+        adam_beta1: AdamW beta1.
+        adam_beta2: AdamW beta2.
+        weight_decay: Weight decay for the optimizer.
+        full_finetuning: Whether to do full finetuning.
+        trainer_output_dir: Dir for trainer CPs (relative to hydra CWD).
+        save_model_path: Path to save final model (relative to hydra CWD).
+        profile: Whether to enable PyTorch Profiler.
+        warmup_ratio: Warmup ratio for learning rate scheduler.
+        lr_scheduler_type: Learning rate scheduler type.
+        logging_steps: Log every N steps.
+        per_device_train_batch_size: Batch size per device for training.
+        gradient_accumulation_steps: Gradient accumulation steps.
+        max_steps: Total number of training steps.
+        save_steps: Save checkpoint every N steps.
+        max_grad_norm: Maximum gradient norm for clipping.
+        report_to: List of services to report results to (e.g., ["wandb"]).
+        log_completions_to_wandb: For GRPO, log completions to wandb.
+        grpo_num_generations: Number of generations for GRPO.
+        evaluation_enabled: Whether to enable evaluation callback.
         eval_steps: Evaluate every N steps.
-        eval_datasets: List of dataset names ('svamp', 'gsm8k') to evaluate on.
         eval_num_samples: Number of samples for evaluation (None for all).
         eval_batch_size: Batch size for evaluation inference.
         eval_max_new_tokens: Max new tokens for eval generation.
-        profile: Whether to enable PyTorch Profiler.
-        evaluation_enabled: Whether to enable evaluation callback during training.
+        wandb_project: Name of the wandb project.
     """
-    # Initialize wandb
     wandb.init(project=wandb_project)
 
     from trl import GRPOConfig, GRPOTrainer
 
-    # Initialize model and tokenizer
-    model, tokenizer = initialize_model(
-        model_name=model_name,
-        max_seq_length=max_seq_length,
-        load_in_4bit=load_in_4bit,
-        load_in_8bit=load_in_8bit,
-        full_finetuning=full_finetuning,
-    )
-
-    # Add LoRA adapters
-    model = add_lora_adapters(model)
-
-    # Get markers and format system prompt
-    markers = get_reasoning_markers()
-    system_prompt = get_system_prompt(markers)
-
-    # Load and process dataset
-    dataset = load_gsm8k_dataset(split="train")
-    formatted_dataset = create_prompt_format(system_prompt, markers, dataset)
-
-    # Create regex patterns for reward functions
-    patterns = create_regex_patterns(markers)
-
-    # Set up training arguments
-    training_config = get_training_config(
-        max_prompt_length=max_prompt_length,
-        max_seq_length=max_seq_length,
-    )
-    training_config["output_dir"] = output_dir
-    training_config["log_completions"] = log_completions
-    training_config["report_to"] = ["wandb"]
-    training_args = GRPOConfig(**training_config)
-
-    # Initialize reward functions with the correct patterns and markers
-    reward_functions = [
-        lambda completions, **kwargs: match_format_exactly(
-            completions, pattern=patterns["format"], **kwargs
-        ),
-        lambda completions, **kwargs: match_format_approximately(
-            completions, markers=markers, **kwargs
-        ),
-        lambda prompts, completions, answer, **kwargs: check_answer(
-            prompts, completions, answer, pattern=patterns["format"], **kwargs
-        ),
-        lambda prompts, completions, answer, **kwargs: check_numbers(
-            prompts, completions, answer, pattern=patterns["numbers"], **kwargs
-        ),
-    ]
-
-    # Initialize Evaluation Callback
-    callbacks = []
-    if evaluation_enabled:
-        evaluation_callback = EvaluationCallback(
-            eval_datasets=eval_datasets,
-            eval_steps=eval_steps,
-            system_prompt=system_prompt,
-            markers=markers,
-            tokenizer=tokenizer,
-            eval_max_new_tokens=eval_max_new_tokens,
-            eval_num_samples=eval_num_samples,
-            eval_batch_size=eval_batch_size,
-            profile=profile,
+    with torch.cuda.nvtx.range("Initialize Model and Tokenizer"):
+        model, tokenizer = initialize_model(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            load_in_4bit=load_in_4bit,
+            load_in_8bit=load_in_8bit,
+            full_finetuning=full_finetuning,
         )
-        callbacks.append(evaluation_callback)
 
-    # Initialize trainer
-    trainer = GRPOTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        reward_funcs=reward_functions,
-        args=training_args,
-        train_dataset=formatted_dataset,
-        callbacks=callbacks,
-    )
+    with torch.cuda.nvtx.range("Add LoRA Adapters"):
+        model = add_lora_adapters(model)
 
-    # Train the model
-    # --- Profiling --- #
-    if profile:
-        print("Profiling enabled. Traces will be logged to TensorBoard.")
-        with profiler.profile(
-            activities=[
-                profiler.ProfilerActivity.CPU,
-                profiler.ProfilerActivity.CUDA,
-            ],
-            schedule=profiler.schedule(
-                wait=1, warmup=1, active=1, repeat=1
-            ),  # Profile only 1 step
-            on_trace_ready=get_trace_handler("train"),  # Use helper function
-            record_shapes=True,
-            profile_memory=False,  # Disable memory profiling
-            with_stack=False,  # Already disabled
-        ):  # Remove unused variable assignment
+    with torch.cuda.nvtx.range("Prepare Data and Prompts"):
+        # Using default_v1 model config for general training setup
+        markers = get_markers_for_model("default_v1")
+        system_prompt = generate_system_prompt_for_model("default_v1")
+
+        try:
+            processor = get_dataset_processor(training_dataset_name)
+            formatted_dataset = processor.create_formatted_dataset(
+                system_prompt, split="train"
+            )
+        except (ValueError, NotImplementedError) as e:
+            error_msg = (
+                f"Error preparing training dataset "
+                f"{training_dataset_name}:\n{e}"
+            )
+            logger.error(error_msg)
+            wandb.finish()
+            return
+
+        if not formatted_dataset or len(formatted_dataset) == 0:
+            logger.warning(
+                f"No training data for {training_dataset_name}. Aborting."
+            )
+            wandb.finish()
+            return
+
+        patterns = create_regex_patterns(markers)
+
+    with torch.cuda.nvtx.range("Setup Training Args and Rewards"):
+        training_args_dict = {
+            "output_dir": trainer_output_dir,
+            "learning_rate": learning_rate,
+            "adam_beta1": adam_beta1,
+            "adam_beta2": adam_beta2,
+            "weight_decay": weight_decay,
+            "warmup_ratio": warmup_ratio,
+            "lr_scheduler_type": lr_scheduler_type,
+            "optim": optim_name,
+            "logging_steps": logging_steps,
+            "per_device_train_batch_size": per_device_train_batch_size,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "max_steps": max_steps,
+            "save_steps": save_steps,
+            "max_grad_norm": max_grad_norm,
+            "report_to": report_to,
+            "max_prompt_length": max_prompt_length,
+            "num_generations": grpo_num_generations,
+            "log_completions": log_completions_to_wandb,
+            "max_completion_length": max_seq_length,
+        }
+        training_args = GRPOConfig(**training_args_dict)
+
+        reward_functions = [
+            lambda completions, **kwargs: match_format_exactly(
+                completions, pattern=patterns["format"], **kwargs
+            ),
+            lambda completions, **kwargs: match_format_approximately(
+                completions, markers=markers, **kwargs
+            ),
+            lambda prompts, completions, answer, **kwargs: check_answer(
+                prompts,
+                completions,
+                answer,
+                pattern=patterns["format"],
+                **kwargs,
+            ),
+            lambda prompts, completions, answer, **kwargs: check_numbers(
+                prompts,
+                completions,
+                answer,
+                pattern=patterns["numbers"],
+                **kwargs,
+            ),
+        ]
+
+    with torch.cuda.nvtx.range("Setup Evaluation Callback"):
+        callbacks = []
+        if evaluation_enabled and eval_datasets:
+            evaluation_callback = EvaluationCallback(
+                eval_datasets=eval_datasets,
+                eval_steps=eval_steps,
+                system_prompt=system_prompt,
+                markers=markers,
+                tokenizer=tokenizer,
+                eval_max_new_tokens=eval_max_new_tokens,
+                eval_num_samples=eval_num_samples,
+                eval_batch_size=eval_batch_size,
+                profile=profile,
+            )
+            callbacks.append(evaluation_callback)
+
+    with torch.cuda.nvtx.range("Initialize Trainer"):
+        trainer = GRPOTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            reward_funcs=reward_functions,
+            args=training_args,
+            train_dataset=formatted_dataset,
+            callbacks=callbacks,
+        )
+
+    with torch.cuda.nvtx.range("Training"):
+        if profile:
+            logger.info(
+                "Profiling enabled. Traces will be logged to TensorBoard."
+            )
+            with profiler.profile(
+                activities=[
+                    profiler.ProfilerActivity.CPU,
+                    profiler.ProfilerActivity.CUDA,
+                ],
+                schedule=profiler.schedule(
+                    wait=1, warmup=1, active=1, repeat=1
+                ),
+                on_trace_ready=get_trace_handler("train"),
+                record_shapes=True,
+                profile_memory=False,
+                with_stack=False,
+            ):
+                trainer.train()
+        else:
             trainer.train()
-            # If you need the profiler object later, assign it back:
-            # as prof:
-            #    trainer.train()
-            #    print(prof.key_averages().table(sort_by="cpu_time_total"))
-    else:
-        trainer.train()
-    # --- End Profiling --- #
 
-    # Save the model
-    save_model(model, tokenizer, save_model_path)
+    with torch.cuda.nvtx.range("Save Model"):
+        save_model(model, tokenizer, save_model_path)
 
-    # Finish wandb run
     wandb.finish()
-
-    print(f"Model successfully trained and saved to {save_model_path}")
+    logger.info(f"Model successfully trained and saved to {save_model_path}")
 
 
 def inference_demo(
     model_path: str = "gemma-3",
     query: str = "What is the sqrt of 101?",
     max_new_tokens: int = 64,
+    model_id: str = "default_v1",
 ) -> None:
-    """
-    Run a simple inference demo with the trained model.
+    """Demonstrates inference with a trained model.
 
     Args:
-        model_path: Path to the saved model
-        query: Question to ask the model
-        max_new_tokens: Maximum number of tokens to generate
+        model_path: Path to the saved model.
+        query: The query string to ask the model.
+        max_new_tokens: Maximum number of new tokens to generate.
+        model_id: Identifier for the model configuration to use.
     """
-    # Initialize model and tokenizer
+    logger.info(f"Starting inference demo with model: {model_path}")
+    logger.info(f"Query: {query}")
+
     model, tokenizer = initialize_model(
         model_name=model_path,
-        max_seq_length=1024,
+        max_seq_length=1024,  # Placeholder, adjust as needed
+        load_in_4bit=False,
+        load_in_8bit=False,
+        # Not relevant for loading a pre-trained model for inference
+        full_finetuning=False,
     )
+    model.eval()  # Set model to evaluation mode
 
-    # Get markers and format system prompt
-    markers = get_reasoning_markers()
-    system_prompt = get_system_prompt(markers)
+    # Get system prompt for the given model_id.
+    # Markers are not directly used by format_chat_prompt
+    system_prompt = generate_system_prompt_for_model(model_id)
+    # We also need the markers if we want to extract solution later,
+    # even if not passed to generation
+    markers = get_markers_for_model(model_id)
 
-    # Format prompt and generate
-    formatted_prompt = format_chat_prompt(tokenizer, system_prompt, query)
-    generate_response(
-        model,
-        tokenizer,
-        formatted_prompt,
+    formatted_prompt = format_chat_prompt(
+        tokenizer=tokenizer,  # Added tokenizer
+        system_prompt=system_prompt,  # Renamed from system_message
+        user_prompt=query,  # Renamed from user_message, removed markers
+    )
+    logger.info("Formatted prompt for model:")
+    logger.info(formatted_prompt)
+
+    response = generate_response(
+        model=model,
+        tokenizer=tokenizer,
+        formatted_prompt=formatted_prompt,  # Renamed from prompt
         max_new_tokens=max_new_tokens,
+        # Removed markers argument
     )
+    logger.info("Model response:")
+    logger.info(response)
+
+    # Solution extraction logic remains, using markers obtained earlier
+    solution_start = markers.get("solution_start")
+    solution_end = markers.get("solution_end")
+
+    if (
+        response
+        and solution_start
+        and solution_end
+        and solution_start in response
+    ):
+        try:
+            start_index = response.rindex(solution_start) + len(solution_start)
+            end_index = response.rindex(solution_end, start_index)
+            solution_text = response[start_index:end_index].strip()
+            logger.info("Extracted solution:")
+            logger.info(solution_text)
+        except ValueError:
+            logger.warning(
+                "Could not find solution end marker after start marker. "
+                "Full response used."
+            )
+    else:
+        logger.info(
+            "Solution markers not found or not configured; "
+            "showing full response as solution."
+        )
 
 
 if __name__ == "__main__":
-    # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
 
-    # Train the model
-    train()
-
-    # Run inference demo
-    inference_demo()
+    logger.info(
+        "This script is intended to be run via train_gsm8k.py using Hydra."
+    )
+    logger.info(
+        "If you want to run train directly, "
+        "uncomment and modify an example call."
+    )
