@@ -24,6 +24,25 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
             "and {solution_end}"
         ),
     },
+    "finqa_v1": {
+        "markers": {
+            "reasoning_start": "<start_working_out>",
+            "reasoning_end": "<end_working_out>",
+            "solution_start": "<SOLUTION>",
+            "solution_end": "</SOLUTION>",
+        },
+        "system_prompt_template": (
+            "You are given a financial problem. "
+            "First, provide your reasoning and thought process to arrive at "
+            "the final answer. Place your reasoning between {reasoning_start} "
+            "and {reasoning_end}.\n"
+            "Then, provide the final answer to the problem directly between "
+            "{solution_start} and {solution_end}."
+            # "The final answer is usually "
+            # "a number, percentage, or currency value (e.g., $1,234.56, 75%, "
+            # "500)."
+        ),
+    },
     "experimental_model_x": {
         "markers": {
             "reasoning_start": "[THINKING]",

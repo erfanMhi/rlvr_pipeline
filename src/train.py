@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.profiler as profiler
@@ -19,12 +19,7 @@ from src.data import create_regex_patterns, get_dataset_processor
 from src.evaluation import evaluate_model
 from src.inference import format_chat_prompt, generate_response
 from src.model import add_lora_adapters, initialize_model, save_model
-from src.rewards import (
-    check_answer,
-    check_numbers,
-    match_format_approximately,
-    match_format_exactly,
-)
+from src.rewards import get_reward_pipelines
 
 # Configure logging
 logging.basicConfig(
@@ -136,6 +131,8 @@ class EvaluationCallback(TrainerCallback):
                 eval_batch_size=self.eval_batch_size,
                 trace_handler=eval_trace_handler,
             )
+
+            # Log the accuracy to wandb
             wandb.log(
                 {f"eval/{dataset_name}_accuracy": accuracy},
                 step=state.global_step,
@@ -178,6 +175,22 @@ class EvaluationCallback(TrainerCallback):
                     f"Warning: Model not found in kwargs for eval at step "
                     f"{state.global_step}."
                 )
+
+
+# Helper to determine problem configuration based on dataset name
+def _get_problem_config(training_dataset_name: str) -> Tuple[str, str]:
+    """Determines model_config_id and problem_name from training_dataset_name."""
+    dataset_name_lower = training_dataset_name.lower()
+    if "finqa" in dataset_name_lower:
+        return "finqa_v1", "finqa"
+    if "gsm8k" in dataset_name_lower:
+        return "default_v1", "gsm8k"
+
+    logger.warning(
+        f"Could not determine problem config from '{training_dataset_name}'. "
+        f"Using default 'default_v1' and problem 'default'."
+    )
+    return "default_v1", "default"  # Fallback
 
 
 def train(
@@ -263,6 +276,10 @@ def train(
 
     from trl import GRPOConfig, GRPOTrainer
 
+    model_config_id, problem_name_for_rewards = _get_problem_config(
+        training_dataset_name
+    )
+
     with torch.cuda.nvtx.range("Initialize Model and Tokenizer"):
         model, tokenizer = initialize_model(
             model_name=model_name,
@@ -276,12 +293,15 @@ def train(
         model = add_lora_adapters(model)
 
     with torch.cuda.nvtx.range("Prepare Data and Prompts"):
-        # Using default_v1 model config for general training setup
-        markers = get_markers_for_model("default_v1")
-        system_prompt = generate_system_prompt_for_model("default_v1")
+        markers = get_markers_for_model(model_config_id)
+        system_prompt = generate_system_prompt_for_model(model_config_id)
 
         try:
             processor = get_dataset_processor(training_dataset_name)
+            # CRITICAL: Ensure the FinQA dataset processor prepares the
+            # 'answer' column as: List[Dict[str, str]], where each dict is
+            # {'gold_program': str, 'gold_answer': str}. This is vital for
+            # the finqa_reward_adapted function in rewards.py.
             formatted_dataset = processor.create_formatted_dataset(
                 system_prompt, split="train"
             )
@@ -301,63 +321,68 @@ def train(
             wandb.finish()
             return
 
+        # For FinQA, OP_RE is defined in rewards.py and used internally by its
+        # rewards.
+        # GSM8K rewards use patterns["format"] and patterns["numbers"].
         patterns = create_regex_patterns(markers)
 
-    with torch.cuda.nvtx.range("Setup Training Args and Rewards"):
-        training_args_dict = {
-            "output_dir": trainer_output_dir,
-            "learning_rate": learning_rate,
-            "adam_beta1": adam_beta1,
-            "adam_beta2": adam_beta2,
-            "weight_decay": weight_decay,
-            "warmup_ratio": warmup_ratio,
-            "lr_scheduler_type": lr_scheduler_type,
-            "optim": optim_name,
-            "logging_steps": logging_steps,
-            "per_device_train_batch_size": per_device_train_batch_size,
-            "gradient_accumulation_steps": gradient_accumulation_steps,
-            "max_steps": max_steps,
-            "save_steps": save_steps,
-            "max_grad_norm": max_grad_norm,
-            "report_to": report_to,
-            "max_prompt_length": max_prompt_length,
-            "num_generations": grpo_num_generations,
-            "log_completions": log_completions_to_wandb,
-            "max_completion_length": max_seq_length,
-        }
-        training_args = GRPOConfig(**training_args_dict)
+    training_args_dict = {
+        "output_dir": trainer_output_dir,
+        "learning_rate": learning_rate,
+        "adam_beta1": adam_beta1,
+        "adam_beta2": adam_beta2,
+        "weight_decay": weight_decay,
+        "warmup_ratio": warmup_ratio,
+        "lr_scheduler_type": lr_scheduler_type,
+        "optim": optim_name,
+        "logging_steps": logging_steps,
+        "per_device_train_batch_size": per_device_train_batch_size,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "max_steps": max_steps,
+        "save_steps": save_steps,
+        "max_grad_norm": max_grad_norm,
+        "report_to": report_to,
+        "max_prompt_length": max_prompt_length,
+        "num_generations": grpo_num_generations,
+        "log_completions": log_completions_to_wandb,
+        "max_completion_length": max_seq_length - max_prompt_length,
+    }
+    training_args = GRPOConfig(**training_args_dict)
 
-        reward_functions = [
-            lambda completions, **kwargs: match_format_exactly(
-                completions, pattern=patterns["format"], **kwargs
-            ),
-            lambda completions, **kwargs: match_format_approximately(
-                completions, markers=markers, **kwargs
-            ),
-            lambda prompts, completions, answer, **kwargs: check_answer(
-                prompts,
-                completions,
-                answer,
-                pattern=patterns["format"],
-                **kwargs,
-            ),
-            lambda prompts, completions, answer, **kwargs: check_numbers(
-                prompts,
-                completions,
-                answer,
-                pattern=patterns["numbers"],
-                **kwargs,
-            ),
-        ]
+    # Get reward functions using the factory from rewards.py
+    try:
+        reward_functions = get_reward_pipelines(
+            problem_name=problem_name_for_rewards,
+            patterns=patterns,
+            markers=markers,
+        )
+    except ValueError as e:
+        logger.error(f"Error getting reward functions: {e}. Aborting.")
+        wandb.finish()
+        return
+
+    if not reward_functions:
+        logger.error(
+            f"No reward functions for problem '{problem_name_for_rewards}'. "
+            "Aborting."
+        )
+        wandb.finish()
+        return
 
     with torch.cuda.nvtx.range("Setup Evaluation Callback"):
         callbacks = []
         if evaluation_enabled and eval_datasets:
+            # Ensure system_prompt and markers for eval are also from
+            # model_config_id
+            eval_system_prompt = generate_system_prompt_for_model(
+                model_config_id
+            )
+            eval_markers = get_markers_for_model(model_config_id)
             evaluation_callback = EvaluationCallback(
                 eval_datasets=eval_datasets,
                 eval_steps=eval_steps,
-                system_prompt=system_prompt,
-                markers=markers,
+                system_prompt=eval_system_prompt,
+                markers=eval_markers,
                 tokenizer=tokenizer,
                 eval_max_new_tokens=eval_max_new_tokens,
                 eval_num_samples=eval_num_samples,

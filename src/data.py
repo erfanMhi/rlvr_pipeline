@@ -241,7 +241,22 @@ class SVAMPDatasetProcessor(AbstractDatasetProcessor):
                 ) from e2
 
     def get_question_text(self, example: Dict[str, Any]) -> str:
-        return f"{example['Body']}\\nQuestion: {example['Question']}"
+        question = str(example["question"])  # Ensure question is a string
+        evidence_parts = []
+        if "pre_text" in example and example["pre_text"]:
+            evidence_parts.append("\n".join(example["pre_text"][:3]))
+        if "table" in example and example["table"]:
+            table = example["table"]
+            lines = ["\t".join(row) for row in table[:10]]
+            evidence_parts.append("\n".join(lines))
+        if "post_text" in example and example["post_text"]:
+            evidence_parts.append("\n".join(example["post_text"][:3]))
+        evidence = "\n".join(evidence_parts).strip()
+
+        if evidence:
+            return f"{evidence}\n\n" f"{question}"
+        else:
+            return question  # Now question is definitely a string
 
     def extract_ground_truth_answer_from_example(
         self, example: Dict[str, Any]
@@ -279,10 +294,43 @@ class MATHDatasetProcessor(AbstractDatasetProcessor):
         return extract_boxed_answer(str(example["solution"]))
 
 
+class FinQADatasetProcessor(AbstractDatasetProcessor):
+    """Processor for the FinQA dataset."""
+
+    def load_raw_dataset(self, split: str = "train") -> Any:
+        return load_dataset("ibm-research/finqa", split=split)
+
+    def get_question_text(self, example: Dict[str, Any]) -> str:
+        question = str(example["question"])  # Ensure question is a string
+        evidence_parts = []
+        if "pre_text" in example and example["pre_text"]:
+            evidence_parts.append("\n".join(example["pre_text"][:3]))
+        if "table" in example and example["table"]:
+            table = example["table"]
+            lines = ["\t".join(row) for row in table[:10]]
+            evidence_parts.append("\n".join(lines))
+        if "post_text" in example and example["post_text"]:
+            evidence_parts.append("\n".join(example["post_text"][:3]))
+        evidence = "\n".join(evidence_parts).strip()
+
+        if evidence:
+            # Formatted to avoid line length issues
+            return f"{evidence}\n\n" f"{question}"
+        else:
+            return question  # question is now guaranteed to be a string
+
+    def extract_ground_truth_answer_from_example(
+        self, example: Dict[str, Any]
+    ) -> Optional[str]:
+        answer = example.get("answer") or example.get("final_result")
+        return str(answer) if answer is not None else None
+
+
 DATASET_PROCESSORS: Dict[str, Type[AbstractDatasetProcessor]] = {
     "gsm8k": GSM8KDatasetProcessor,
     "svamp": SVAMPDatasetProcessor,
     "math": MATHDatasetProcessor,
+    "finqa": FinQADatasetProcessor,
 }
 
 
@@ -344,4 +392,7 @@ def create_regex_patterns(
         flags=re.MULTILINE | re.DOTALL,
     )
 
-    return {"format": format_pattern, "numbers": numbers_pattern}
+    return {
+        "format": format_pattern,
+        "numbers": numbers_pattern,
+    }
