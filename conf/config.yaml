@@ -3,14 +3,14 @@ defaults:
 
 model:
   name: unsloth/gemma-3-1b-it
-  max_seq_length: 1024
-  max_prompt_length: 256
+  max_seq_length: 1536
+  max_prompt_length: 1024
   load_in_4bit: false
   load_in_8bit: false
 
 data:
-  train_dataset_name: gsm8k
-  eval_datasets: ["svamp", "gsm8k"]
+  train_dataset_name: finqa # gsm8k, finqa
+  eval_datasets: ["finqa"]
 
 optimizer:
   name: adamw_torch_fused
@@ -31,26 +31,26 @@ training:
   warmup_ratio: 0.1
   lr_scheduler_type: cosine
   logging_steps: 1
-  per_device_train_batch_size: 16
+  per_device_train_batch_size: 8
   gradient_accumulation_steps: 1
-  max_steps: 50 # Consider increasing for actual runs
-  save_steps: 50
+  max_steps: 8000 # Consider increasing for actual runs
+  save_steps: 250
   max_grad_norm: 0.1
   report_to: ["wandb"]
   log_completions_to_wandb: true # For GRPOConfig
 
 grpo:
-  num_generations: 16
+  num_generations: 8
 
 evaluation:
   enabled: true
   steps: 100
   num_samples: null # null for all samples
-  batch_size: 512
-  max_new_tokens: 256 # This was already here
+  batch_size: 256
+  max_new_tokens: 1024 # This was already here
 
 wandb:
-  project: gsm8k-grpo
+  project: finqa-grpo-v3
 
 # Hydra settings
 hydra:
