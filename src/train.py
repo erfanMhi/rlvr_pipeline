@@ -177,22 +177,6 @@ class EvaluationCallback(TrainerCallback):
                 )
 
 
-# Helper to determine problem configuration based on dataset name
-def _get_problem_config(training_dataset_name: str) -> Tuple[str, str]:
-    """Determines model_config_id and problem_name from training_dataset_name."""
-    dataset_name_lower = training_dataset_name.lower()
-    if "finqa" in dataset_name_lower:
-        return "finqa_v1", "finqa"
-    if "gsm8k" in dataset_name_lower:
-        return "default_v1", "gsm8k"
-
-    logger.warning(
-        f"Could not determine problem config from '{training_dataset_name}'. "
-        f"Using default 'default_v1' and problem 'default'."
-    )
-    return "default_v1", "default"  # Fallback
-
-
 def train(
     # Model parameters
     model_name: str,
@@ -276,10 +260,6 @@ def train(
 
     from trl import GRPOConfig, GRPOTrainer
 
-    model_config_id, problem_name_for_rewards = _get_problem_config(
-        training_dataset_name
-    )
-
     with torch.cuda.nvtx.range("Initialize Model and Tokenizer"):
         model, tokenizer = initialize_model(
             model_name=model_name,
@@ -289,12 +269,21 @@ def train(
             full_finetuning=full_finetuning,
         )
 
+    # TODO: this is a temporary solution. You need to think about a proper
+    # redesign
+    if "gsm8k" in training_dataset_name:
+        task_name = "math_reasoning"
+    elif "finqa" in training_dataset_name:
+        task_name = "financial_reasoning"
+    else:
+        raise ValueError(f"Unknown dataset: {training_dataset_name}")
+
     with torch.cuda.nvtx.range("Add LoRA Adapters"):
         model = add_lora_adapters(model)
 
     with torch.cuda.nvtx.range("Prepare Data and Prompts"):
-        markers = get_markers_for_model(model_config_id)
-        system_prompt = generate_system_prompt_for_model(model_config_id)
+        markers = get_markers_for_model(model_name)
+        system_prompt = generate_system_prompt_for_model(task_name)
 
         try:
             processor = get_dataset_processor(training_dataset_name)
@@ -352,7 +341,7 @@ def train(
     # Get reward functions using the factory from rewards.py
     try:
         reward_functions = get_reward_pipelines(
-            problem_name=problem_name_for_rewards,
+            problem_name=task_name,
             patterns=patterns,
             markers=markers,
         )
@@ -363,8 +352,7 @@ def train(
 
     if not reward_functions:
         logger.error(
-            f"No reward functions for problem '{problem_name_for_rewards}'. "
-            "Aborting."
+            f"No reward functions for problem '{task_name}'. " "Aborting."
         )
         wandb.finish()
         return
@@ -374,10 +362,8 @@ def train(
         if evaluation_enabled and eval_datasets:
             # Ensure system_prompt and markers for eval are also from
             # model_config_id
-            eval_system_prompt = generate_system_prompt_for_model(
-                model_config_id
-            )
-            eval_markers = get_markers_for_model(model_config_id)
+            eval_system_prompt = generate_system_prompt_for_model(task_name)
+            eval_markers = get_markers_for_model(model_name)
             evaluation_callback = EvaluationCallback(
                 eval_datasets=eval_datasets,
                 eval_steps=eval_steps,

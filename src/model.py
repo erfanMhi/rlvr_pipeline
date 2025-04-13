@@ -2,7 +2,7 @@
 
 from typing import Any, Optional, Tuple
 
-from unsloth import FastModel
+from unsloth import FastLanguageModel
 
 
 def initialize_model(
@@ -25,13 +25,14 @@ def initialize_model(
     Returns:
         Tuple of (model, tokenizer)
     """
-    model, tokenizer = FastModel.from_pretrained(
+    model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_name,
         max_seq_length=max_seq_length,
         load_in_4bit=load_in_4bit,
         load_in_8bit=load_in_8bit,
         full_finetuning=full_finetuning,
         attn_implementation="sdpa",
+        fast_inference=True,
     )
     return model, tokenizer
 
@@ -66,7 +67,7 @@ def add_lora_adapters(
     Returns:
         Model with LoRA adapters
     """
-    model = FastModel.get_peft_model(
+    model = FastLanguageModel.get_peft_model(
         model,
         finetune_vision_layers=finetune_vision_layers,
         finetune_language_layers=finetune_language_layers,

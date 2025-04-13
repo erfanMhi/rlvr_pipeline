@@ -383,7 +383,7 @@ def get_reward_pipelines(
     Raises:
         ValueError: If problem_name is not recognized.
     """
-    if problem_name.lower().startswith("gsm8k"):
+    if "math_reasoning" == problem_name:
         gsm8k_rewards: List[Callable[..., Any]] = [
             lambda completions, **kwargs_in: match_format_exactly(
                 completions, pattern=patterns["format"], **kwargs_in
@@ -408,7 +408,7 @@ def get_reward_pipelines(
         ]
         return gsm8k_rewards
 
-    elif problem_name.lower().startswith("finqa"):
+    elif "financial_reasoning" == problem_name:
         finqa_rewards: List[Callable[..., Any]] = [
             lambda completions, **kwargs_in: match_format_exactly(
                 completions, pattern=patterns["format"], **kwargs_in
@@ -429,7 +429,7 @@ def get_reward_pipelines(
                 completions,
                 answer,
                 markers=markers,
-                patterns=patterns,
+                pattern=patterns["numbers"],
                 **kwargs_in,
             ),
         ]
