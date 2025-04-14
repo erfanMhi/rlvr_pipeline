@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.profiler as profiler
@@ -27,6 +27,44 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _prepare_training_data_and_components(
+    training_dataset_name: str,
+    model_name: str,
+    task_name: str,
+) -> tuple[
+    Optional[Any],
+    Optional[str],
+    Optional[Dict[str, str]],
+    Optional[Dict[str, Any]],
+]:
+    """Prepare dataset, system prompt, markers, and patterns."""
+    markers = get_markers_for_model(model_name)
+    system_prompt = generate_system_prompt_for_model(task_name)
+
+    try:
+        processor = get_dataset_processor(training_dataset_name)
+        formatted_dataset = processor.create_formatted_dataset(
+            system_prompt, split="train"
+        )
+    except (ValueError, NotImplementedError) as e:
+        error_msg = (
+            f"Error preparing training dataset "
+            f"{training_dataset_name}:\n{e}"
+        )
+        logger.error(error_msg)
+        return None, None, None, None
+
+    if not formatted_dataset or len(formatted_dataset) == 0:
+        logger.warning(
+            f"No training data for {training_dataset_name}. "
+            "Aborting by returning None."
+        )
+        return None, None, None, None
+
+    patterns = create_regex_patterns(markers)
+    return formatted_dataset, system_prompt, markers, patterns
 
 
 def get_trace_handler(phase: str) -> Any:
@@ -282,38 +320,29 @@ def train(
         model = add_lora_adapters(model)
 
     with torch.cuda.nvtx.range("Prepare Data and Prompts"):
-        markers = get_markers_for_model(model_name)
-        system_prompt = generate_system_prompt_for_model(task_name)
+        (
+            formatted_dataset,
+            system_prompt,
+            markers,
+            patterns,
+        ) = _prepare_training_data_and_components(
+            training_dataset_name, model_name, task_name
+        )
 
-        try:
-            processor = get_dataset_processor(training_dataset_name)
-            # CRITICAL: Ensure the FinQA dataset processor prepares the
-            # 'answer' column as: List[Dict[str, str]], where each dict is
-            # {'gold_program': str, 'gold_answer': str}. This is vital for
-            # the finqa_reward_adapted function in rewards.py.
-            formatted_dataset = processor.create_formatted_dataset(
-                system_prompt, split="train"
-            )
-        except (ValueError, NotImplementedError) as e:
-            error_msg = (
-                f"Error preparing training dataset "
-                f"{training_dataset_name}:\n{e}"
-            )
-            logger.error(error_msg)
+        if formatted_dataset is None:  # Data prep failed
             wandb.finish()
             return
 
-        if not formatted_dataset or len(formatted_dataset) == 0:
-            logger.warning(
-                f"No training data for {training_dataset_name}. Aborting."
-            )
-            wandb.finish()
-            return
-
-        # For FinQA, OP_RE is defined in rewards.py and used internally by its
-        # rewards.
-        # GSM8K rewards use patterns["format"] and patterns["numbers"].
-        patterns = create_regex_patterns(markers)
+        # We add assertions here to satisfy mypy.
+        assert (
+            system_prompt is not None
+        ), "system_prompt should not be None after successful data prep"
+        assert (
+            markers is not None
+        ), "markers should not be None after successful data prep"
+        assert (
+            patterns is not None
+        ), "patterns should not be None after successful data prep"
 
     training_args_dict = {
         "output_dir": trainer_output_dir,
@@ -362,13 +391,12 @@ def train(
         if evaluation_enabled and eval_datasets:
             # Ensure system_prompt and markers for eval are also from
             # model_config_id
-            eval_system_prompt = generate_system_prompt_for_model(task_name)
-            eval_markers = get_markers_for_model(model_name)
+            # Use system_prompt and markers from the helper function
             evaluation_callback = EvaluationCallback(
                 eval_datasets=eval_datasets,
                 eval_steps=eval_steps,
-                system_prompt=eval_system_prompt,
-                markers=eval_markers,
+                system_prompt=system_prompt,  # Use system_prompt from helper
+                markers=markers,  # Use markers from helper
                 tokenizer=tokenizer,
                 eval_max_new_tokens=eval_max_new_tokens,
                 eval_num_samples=eval_num_samples,

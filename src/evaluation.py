@@ -64,11 +64,12 @@ def _generate_responses(
     batches_processed = 0
     for i in tqdm(range(0, len(prompts), eval_batch_size)):
         batch_prompts = prompts[i : i + eval_batch_size]
+        _model_device = model.device  # type: ignore[attr-defined]
         inputs = tokenizer(
             batch_prompts, return_tensors="pt", padding=True, truncation=True
-        ).to(model.device)
+        ).to(_model_device)
 
-        outputs = model.generate(
+        outputs = model.generate(  # type: ignore[attr-defined]
             **inputs,
             max_new_tokens=max_new_tokens,
             eos_token_id=tokenizer.eos_token_id,
@@ -261,11 +262,14 @@ def evaluate_model(  # noqa: C901
     # Prompts are already formatted with system message by the data processor.
     # We just need to apply the chat template for final model input string.
     try:
-        prompts = []
+        prompts: List[str] = []  # Explicitly type prompts
         for example in eval_dataset:
             applied_template = tokenizer.apply_chat_template(
                 example["prompt"], tokenize=False, add_generation_prompt=True
             )
+            assert isinstance(
+                applied_template, str
+            )  # Ensure it's a string for mypy
             prompts.append(applied_template)
         ground_truths = eval_dataset["answer"]
     except KeyError as e:

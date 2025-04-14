@@ -244,11 +244,17 @@ def _extract_answer_from_finqa_completion(
     if sol_start and sol_start in content:
         try:
             start_idx = content.index(sol_start) + len(sol_start)
-            try:
-                # Attempt to find sol_end *after* sol_start
-                end_idx = content.rindex(sol_end, start_idx)
-                model_extracted_answer_str = content[start_idx:end_idx]
-            except ValueError:  # sol_end not found after sol_start
+            if sol_end:  # Check if sol_end is not None: Mypy requirements
+                try:
+                    # Attempt to find sol_end *after* sol_start
+                    # sol_end is now guaranteed to be a string here
+                    end_idx = content.rindex(sol_end, start_idx)
+                    model_extracted_answer_str = content[start_idx:end_idx]
+                except (
+                    ValueError
+                ):  # sol_end (string) not found after sol_start
+                    model_extracted_answer_str = content[start_idx:]
+            else:  # sol_end was None
                 model_extracted_answer_str = content[start_idx:]
         except ValueError:  # sol_start not found
             # model_extracted_answer_str remains content (default)
@@ -339,7 +345,7 @@ def check_exact_string_answer_finqa(
     """
     Checks if extracted answer exactly matches gold answer string.
 
-    Rewards exact match between stripped extracted answer & stripped gold answer.
+    Rewards exact match between predicted answer & gold answer.
     """
     scores = []
     for i in range(len(completions)):
@@ -355,11 +361,11 @@ def check_exact_string_answer_finqa(
             scores.append(reward_for_exact_match)
         else:
             scores.append(0.0)
-            # Optional: For debugging differences
-            # logger.debug(
-            #     f"Exact FinQA match failed: Ext '{model_extracted_answer_str}'"
-            #     f" vs Gold '{current_gold_answer_str.strip()}'"
-            # )
+            logger.debug(
+                f"Exact FinQA match failed: Extracted "
+                f"'{model_extracted_answer_str}'"
+                f" vs Gold '{current_gold_answer_str.strip()}'"
+            )
     return scores
 
 
@@ -416,21 +422,25 @@ def get_reward_pipelines(
             lambda completions, **kwargs_in: match_format_approximately(
                 completions, markers=markers, **kwargs_in
             ),
-            lambda prompts, completions, answer, **kwargs_in: check_exact_string_answer_finqa(
-                prompts,
-                completions,
-                answer,
-                markers,
-                reward_for_exact_match=2.0,
-                **kwargs_in,
+            lambda prompts, completions, answer, **kwargs_in: (
+                check_exact_string_answer_finqa(
+                    prompts,
+                    completions,
+                    answer,
+                    markers,
+                    reward_for_exact_match=2.0,
+                    **kwargs_in,
+                ),
             ),
-            lambda prompts, completions, answer, **kwargs_in: finqa_reward_adapted(
-                prompts,
-                completions,
-                answer,
-                markers=markers,
-                pattern=patterns["numbers"],
-                **kwargs_in,
+            lambda prompts, completions, answer, **kwargs_in: (
+                finqa_reward_adapted(
+                    prompts,
+                    completions,
+                    answer,
+                    markers=markers,
+                    pattern=patterns["numbers"],
+                    **kwargs_in,
+                ),
             ),
         ]
         return finqa_rewards
