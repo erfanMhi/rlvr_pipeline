@@ -1,6 +1,5 @@
-import re
 from abc import abstractmethod
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
