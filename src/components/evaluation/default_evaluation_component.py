@@ -1,0 +1,560 @@
+import logging
+from typing import Any, Dict, List, Optional
+
+import torch
+import wandb  # For logging metrics
+from datasets import Dataset
+from tqdm.auto import tqdm
+from transformers import (
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
+    TrainingArguments,
+)
+
+from src.components.data.interface import DataComponentInterface
+from src.components.evaluation.interface import EvaluationComponentInterface
+from src.components.model.interface import ModelComponentInterface
+
+logger = logging.getLogger(__name__)
+
+
+def extract_solution_marker_answer_eval(
+    text: str, markers: Dict[str, str]
+) -> Optional[str]:
+    import re  # Local import
+
+    solution_start = markers.get("solution_start")
+    solution_end = markers.get("solution_end")
+    if not solution_start or not solution_end:
+        return None
+    # Using re.DOTALL for multi-line content within markers
+    pattern_str = (
+        re.escape(solution_start) + r"(.*?)" + re.escape(solution_end)
+    )
+    match = None
+    # Find last occurrence which is typical for final answers
+    for m in re.finditer(pattern_str, text, flags=re.DOTALL | re.MULTILINE):
+        match = m
+    return match.group(1).strip() if match else None
+
+
+def compare_answers_eval(
+    predicted: Optional[str], expected: Optional[str]
+) -> bool:
+    if predicted is None or expected is None:
+        return False
+    # Basic comparison, can be enhanced (e.g. numerical for FinQA)
+    return predicted.strip() == expected.strip()
+
+
+@torch.inference_mode()
+def _generate_responses_eval(
+    model: Any,
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: List[str],
+    eval_batch_size: int,
+    max_new_tokens: int,
+) -> List[str]:
+    model_generations = []
+    # Generate responses in batches using tqdm for progress
+    for i in tqdm(
+        range(0, len(prompts), eval_batch_size),
+        desc="Eval Generation",
+        leave=False,
+    ):
+        batch_prompts = prompts[i : i + eval_batch_size]
+        inputs = tokenizer(
+            batch_prompts, return_tensors="pt", padding=True, truncation=True
+        ).to(
+            model.device
+        )  # type: ignore
+
+        outputs = model.generate(  # type: ignore
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            eos_token_id=tokenizer.eos_token_id,
+            do_sample=False,  # Greedy for consistency in evaluation
+        )
+        batch_generations = tokenizer.batch_decode(
+            outputs[:, inputs.input_ids.shape[1] :], skip_special_tokens=True
+        )
+        model_generations.extend(batch_generations)
+    return model_generations
+
+
+def _determine_predicted_answer_eval(
+    generation: str,
+    dataset_name_for_logging: str,  # e.g. "gsm8k", "math", "finqa"
+    markers: Optional[Dict[str, str]],
+) -> Optional[str]:
+    # Logic for answer extraction based on dataset characteristics
+    if (
+        markers
+        and markers.get("solution_start")
+        and markers.get("solution_end")
+    ):
+        # General case for datasets with solution markers (GSM8K, FinQA)
+        return extract_solution_marker_answer_eval(generation, markers)
+    else:
+        # Fallback: use full generation if no specific extraction defined
+        return generation.strip()
+
+
+@torch.inference_mode()
+def evaluate_model_core(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    eval_dataset: Dataset,  # Pre-formatted HF dataset
+    dataset_name_for_logging: str,
+    markers: Optional[Dict[str, str]],
+    max_new_tokens: int,
+    eval_batch_size: int,
+) -> float:
+    logger.info(f"Core evaluation for {dataset_name_for_logging}...")
+    try:
+        # Prompts are expected in chat format List[Dict[str,str]]
+        # Convert to flat list of strings for generation
+        prompts_for_generation = [
+            tokenizer.apply_chat_template(
+                ex["prompt"], tokenize=False, add_generation_prompt=True
+            )
+            for ex in eval_dataset
+        ]
+        ground_truths = [ex["answer"] for ex in eval_dataset]
+    except KeyError as e:
+        logger.error(f"Dataset {dataset_name_for_logging} missing field: {e}")
+        return 0.0
+    except Exception as e:  # Catch any other error during data prep
+        logger.error(
+            f"Error processing dataset {dataset_name_for_logging}: {e}"
+        )
+        return 0.0
+
+    if not prompts_for_generation:
+        logger.warning(
+            f"No prompts to evaluate for {dataset_name_for_logging}."
+        )
+        return 0.0
+
+    model_generations = _generate_responses_eval(
+        model,
+        tokenizer,
+        prompts_for_generation,  # type: ignore
+        eval_batch_size,
+        max_new_tokens,
+    )
+
+    correct_count = 0
+    num_examples = len(ground_truths)
+
+    for i, (gen, expected_answer) in enumerate(
+        zip(model_generations, ground_truths)
+    ):
+        predicted_answer = _determine_predicted_answer_eval(
+            gen, dataset_name_for_logging, markers
+        )
+        is_correct = compare_answers_eval(predicted_answer, expected_answer)
+        if is_correct:
+            correct_count += 1
+
+        if i < 5:  # Log first few examples for debugging
+            log_msg_parts = [
+                f"Eval Example {i+1}/{num_examples} "
+                f"({dataset_name_for_logging})",
+                f"  Generation (snippet): {gen[:100]}...",
+                f"  Predicted Answer: {predicted_answer}",
+                f"  Expected Answer: {expected_answer} "
+                f"| Correct: {is_correct}",
+            ]
+            logger.debug("\n".join(log_msg_parts))
+
+    accuracy = (
+        (correct_count / num_examples) * 100 if num_examples > 0 else 0.0
+    )
+    logger.info(
+        f"Accuracy on {dataset_name_for_logging}: {accuracy:.2f}% "
+        f"({correct_count}/{num_examples})"
+    )
+    return accuracy
+
+
+# --- Custom Evaluation Callback ---
+class CustomEvaluationCallback(TrainerCallback):
+    def __init__(
+        self,
+        data_component: DataComponentInterface,
+        model_component: ModelComponentInterface,
+        eval_datasets_names: List[str],
+        eval_steps: int,
+        eval_max_new_tokens: int,
+        system_prompt: str,
+        tokenizer: PreTrainedTokenizerBase,
+        eval_num_samples: Optional[int] = None,
+        eval_batch_size: int = 8,
+    ):
+        self.data_component = data_component
+        self.model_component = model_component
+        self.eval_datasets_names = eval_datasets_names
+        self.eval_steps = eval_steps
+        self.eval_max_new_tokens = eval_max_new_tokens
+        self.eval_num_samples = eval_num_samples
+        self.eval_batch_size = eval_batch_size
+        self.system_prompt = system_prompt
+        self.tokenizer = tokenizer
+        self._last_log_step = -1  # Initialize last log step
+
+    def _run_evaluation(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        model: Any,
+        tokenizer: PreTrainedTokenizerBase,
+    ) -> None:
+        # Avoid re-evaluation if already done for this step
+        # Allow eval at step 0 only if on_train_begin runs it first
+        if state.global_step == self._last_log_step or (
+            state.global_step == 0 and self._last_log_step != -1
+        ):
+            return
+
+        logger.info(
+            f"EvaluationCallback: Evaluating at step {state.global_step}"
+        )
+        model.eval()  # type: ignore
+
+        for dataset_name in self.eval_datasets_names:
+            try:
+                # Get task name for the current eval dataset
+                # Assumes data_component has get_task_name_for_dataset method
+                system_prompt_for_eval = self.system_prompt
+                if system_prompt_for_eval is None:
+                    logger.error(
+                        f"System prompt for key '{system_prompt_for_eval}' "
+                        f"not found for {dataset_name}. Skipping."
+                    )
+                    continue
+
+                markers_for_eval = self.model_component.get_markers()
+
+                # Load and prepare dataset using DataComponent
+                # load_and_prepare_data returns a Dataset directly, not a tuple
+                eval_dataset_formatted = (
+                    self.data_component.load_and_prepare_data(
+                        tokenizer=tokenizer,
+                        system_prompt=system_prompt_for_eval,
+                        dataset_name_override=dataset_name,
+                        split="test",  # Default to test split for eval
+                    )
+                )
+
+                if self.eval_num_samples and self.eval_num_samples > 0:
+                    eval_dataset_formatted = eval_dataset_formatted.select(
+                        range(
+                            min(
+                                self.eval_num_samples,
+                                len(eval_dataset_formatted),
+                            )
+                        )
+                    )
+
+                if (
+                    not eval_dataset_formatted
+                    or len(eval_dataset_formatted) == 0
+                ):
+                    raise ValueError(
+                        f"No data for {dataset_name} "
+                        f"(step {state.global_step})."
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Error preparing {dataset_name} for eval: {e}",
+                    exc_info=True,
+                )
+                continue
+
+            accuracy = evaluate_model_core(
+                model=model,
+                tokenizer=tokenizer,
+                eval_dataset=eval_dataset_formatted,
+                dataset_name_for_logging=dataset_name,
+                markers=markers_for_eval,
+                max_new_tokens=self.eval_max_new_tokens,
+                eval_batch_size=self.eval_batch_size,
+            )
+            if wandb.run:  # Log to wandb if active
+                wandb.log(
+                    {f"eval/{dataset_name}_accuracy": accuracy},
+                    step=state.global_step,
+                )
+
+        logger.info(
+            f"EvaluationCallback: Finished eval for step {state.global_step}"
+        )
+        model.train()  # type: ignore
+        # Update last_log_step, handle step 0 case for on_train_begin
+        self._last_log_step = state.global_step if state.global_step > 0 else 0
+
+    def on_train_begin(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs: Any,
+    ) -> None:
+        model = kwargs.get("model")
+        # Use stored tokenizer instead of getting from kwargs
+        tokenizer = kwargs.get("tokenizer") or self.tokenizer
+        if model and tokenizer:
+            logger.info("EvalCallback: Initial evaluation on_train_begin.")
+            self._run_evaluation(args, state, model, tokenizer)
+        else:
+            logger.warning(
+                "EvalCallback: Model/Tokenizer not found for initial eval."
+            )
+
+    def on_step_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs: Any,
+    ) -> None:
+        if (
+            state.global_step > 0
+            and self.eval_steps > 0
+            and state.global_step % self.eval_steps == 0
+        ):
+            model = kwargs.get("model")
+            # Use stored tokenizer instead of getting from kwargs
+            tokenizer = kwargs.get("tokenizer") or self.tokenizer
+            if model and tokenizer:
+                self._run_evaluation(args, state, model, tokenizer)
+            else:
+                logger.warning(
+                    f"EvalCallback: Model/Tokenizer not found at step "
+                    f"{state.global_step}."
+                )
+
+
+class DefaultEvaluationComponent(EvaluationComponentInterface):
+
+    def __init__(
+        self, eval_config: Dict[str, Any], prompts_config: Dict[str, Any]
+    ):
+        super().__init__(eval_config)  # eval_config is now self.config
+        self.prompts_config = prompts_config
+        self.data_component_instance: Optional[DataComponentInterface] = None
+        self.model_component_instance: Optional[ModelComponentInterface] = None
+
+    def set_dependencies(self, data_comp: Any, model_comp: Any) -> None:
+        """Injects component instances, called by orchestrator."""
+        self.data_component_instance = data_comp
+        self.model_component_instance = model_comp
+
+    def _validate_prompt_key_exists(
+        self,
+        key: Optional[str],
+        key_name: str,
+        system_prompts: Dict[str, str],
+        dataset_name: Optional[str] = None,
+    ) -> bool:
+        """Helper to validate if a prompt key exists in system_prompts."""
+        if key and key not in system_prompts:
+            ds_info = f" for dataset '{dataset_name}'" if dataset_name else ""
+            logger.error(
+                f"Prompt key '{key}' (from '{key_name}')"
+                f"{ds_info} not found in global system_prompts."
+            )
+            return False
+        return True
+
+    def _validate_all_datasets_have_prompts(
+        self,
+        eval_datasets_names: List[str],
+        eval_dataset_prompt_keys: Dict[str, str],
+        default_eval_prompt_key: Optional[str],
+    ) -> bool:
+        """Helper to ensure all eval datasets can resolve to a prompt key."""
+        for name in eval_datasets_names:
+            if (
+                not eval_dataset_prompt_keys.get(name)
+                and not default_eval_prompt_key
+            ):
+                logger.error(
+                    f"Dataset '{name}' has no specific prompt key and no "
+                    "'default_eval_prompt_key' is set."
+                )
+                return False
+        return True
+
+    def validate_config(self) -> bool:
+        if not self.config.get("enabled", True):
+            return True
+
+        eval_datasets_names = self.config.get("eval_datasets_names")
+        if not eval_datasets_names:
+            logger.warning(
+                "No 'eval_datasets_names' in EvalComponent config. "
+                "Eval disabled."
+            )
+            self.config["enabled"] = False
+            return True
+
+        eval_steps = self.config.get("eval_steps")
+        if not isinstance(eval_steps, int) or eval_steps <= 0:
+            logger.error("'eval_steps' must be a positive int for evaluation.")
+            return False
+
+        # TODO: validate prompt later
+        return True
+
+    def get_trainer_callback(
+        self,
+        data_component_instance: DataComponentInterface,
+        model_component_instance: ModelComponentInterface,
+        tokenizer: PreTrainedTokenizerBase,
+    ) -> Optional[TrainerCallback]:
+        if not self.config.get("enabled", True) or not self.config.get(
+            "eval_datasets_names"
+        ):
+            logger.info(
+                "Evaluation disabled or no datasets. No callback created."
+            )
+            return None
+        if not self.validate_config():  # Re-validate before creating callback
+            logger.error(
+                "EvalComponent config invalid. Cannot create callback."
+            )
+            return None
+
+        self.set_dependencies(
+            data_component_instance, model_component_instance
+        )
+
+        system_prompts = self.prompts_config.get("system_prompts", {})
+        prompting_mode = self.prompts_config.get("prompting_mode", {})
+        system_prompt_str = system_prompts.get(prompting_mode)
+        if system_prompt_str is None:
+            logger.error(
+                f"System prompt for key '{prompting_mode}' not found in "
+                "system_prompts."
+            )
+            return None
+
+        return CustomEvaluationCallback(
+            data_component=data_component_instance,
+            model_component=model_component_instance,
+            eval_datasets_names=self.config["eval_datasets_names"],
+            eval_steps=self.config["eval_steps"],
+            eval_max_new_tokens=self.config.get("eval_max_new_tokens", 256),
+            eval_num_samples=self.config.get("eval_num_samples"),
+            eval_batch_size=self.config.get("eval_batch_size", 8),
+            system_prompt=system_prompt_str,
+            tokenizer=tokenizer,
+        )
+
+    def on_evaluation_run(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        trainer_state: TrainerState,
+    ) -> None:
+        logger.info("DefaultEvaluationComponent.on_evaluation_run called.")
+        if not self.config.get("enabled", True) or not self.config.get(
+            "eval_datasets_names"
+        ):
+            logger.info(
+                "Eval not enabled or no datasets for on_evaluation_run."
+            )
+            return
+
+        if (
+            not self.data_component_instance
+            or not self.model_component_instance
+        ):
+            logger.error(
+                "Data/Model component instances not set for on_evaluation_run."
+            )
+            return
+
+        for dataset_name in self.config.get("eval_datasets_names", []):
+            logger.info(f"Post-training evaluation on: {dataset_name}")
+            try:
+                system_prompts_dict = self.prompts_config.get(
+                    "system_prompts", {}
+                )
+                eval_dataset_prompt_keys_map = self.config.get(
+                    "eval_dataset_prompt_keys", {}
+                )
+                default_key = self.config.get("default_eval_prompt_key")
+
+                prompt_key = eval_dataset_prompt_keys_map.get(
+                    dataset_name, default_key
+                )
+
+                if not prompt_key:
+                    logger.error(
+                        f"No prompt key for {dataset_name} and no default in "
+                        "on_evaluation_run. Skipping."
+                    )
+                    continue
+                system_prompt_for_eval = system_prompts_dict.get(prompt_key)
+                if system_prompt_for_eval is None:
+                    logger.error(
+                        f"System prompt for key '{prompt_key}' not found "
+                        f"for {dataset_name} in on_evaluation_run. Skipping."
+                    )
+                    continue
+
+                markers_for_eval = (
+                    self.model_component_instance.get_markers()  # type: ignore
+                )
+
+                eval_dataset_formatted = (
+                    # type: ignore
+                    self.data_component_instance.load_and_prepare_data(
+                        tokenizer=tokenizer,
+                        system_prompt=system_prompt_for_eval,
+                        dataset_name_override=dataset_name,
+                        split="test",
+                    )
+                )
+                num_samples = self.config.get("eval_num_samples")
+                if num_samples and num_samples > 0:
+                    eval_dataset_formatted = eval_dataset_formatted.select(
+                        range(min(num_samples, len(eval_dataset_formatted)))
+                    )
+                if (
+                    not eval_dataset_formatted
+                    or len(eval_dataset_formatted) == 0
+                ):
+                    logger.info(
+                        f"No data for post-train eval on {dataset_name}. "
+                        "Skipping."
+                    )
+                    continue
+
+                accuracy = evaluate_model_core(
+                    model=model,
+                    tokenizer=tokenizer,
+                    eval_dataset=eval_dataset_formatted,
+                    dataset_name_for_logging=dataset_name,
+                    markers=markers_for_eval,
+                    max_new_tokens=self.config.get("eval_max_new_tokens", 256),
+                    eval_batch_size=self.config.get("eval_batch_size", 8),
+                )
+                if wandb.run:
+                    wandb.log(
+                        {f"post_train_eval/{dataset_name}_accuracy": accuracy},
+                        step=trainer_state.global_step,
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error in on_evaluation_run for {dataset_name}: {e}",
+                    exc_info=True,
+                )
+        logger.info("DefaultEvaluationComponent.on_evaluation_run finished.")
