@@ -21,14 +21,16 @@ import logging
 import math
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
 # Import our pipeline orchestrator
 from src.orchestration.pipeline_orchestrator import PipelineOrchestrator
-from src.train import inference_demo  # Optional, for inference after training
+
+# from src.train import inference_demo
+# Optional, for inference after training
 from src.utils.custom_hydra_resolvers import register_custom_resolvers
 
 # Register custom OmegaConf resolvers
@@ -53,48 +55,48 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_inference(cfg: DictConfig, model_path: Optional[str] = None) -> None:
-    """Run inference with the trained model."""
-    if not cfg.get("inference", {}).get("run", False):
-        logger.info("Inference disabled in configuration. Skipping.")
-        return
+# def run_inference(cfg: DictConfig, model_path: Optional[str] = None) -> None:
+#     """Run inference with the trained model."""
+#     if not cfg.get("inference", {}).get("run", False):
+#         logger.info("Inference disabled in configuration. Skipping.")
+#         return
 
-    try:
-        # Use model_path if provided, otherwise get from config
-        inference_model_path = model_path or cfg.model_component.get(
-            "save_model_path"
-        )
+#     try:
+#         # Use model_path if provided, otherwise get from config
+#         inference_model_path = model_path or cfg.model_component.get(
+#             "save_model_path"
+#         )
 
-        if not inference_model_path:
-            logger.warning("No model path specified for inference. Skipping.")
-            return
+#         if not inference_model_path:
+#             logger.warning("No model path set for inference. Skipping.")
+#             return
 
-        # Resolve path if relative - ensures correct path resolution
-        # regardless of Hydra's output dir
-        if not os.path.isabs(inference_model_path):
-            original_cwd = hydra.utils.get_original_cwd()
-            inference_model_path = os.path.join(
-                original_cwd, inference_model_path
-            )
+#         # Resolve path if relative - ensures correct path resolution
+#         # regardless of Hydra's output dir
+#         if not os.path.isabs(inference_model_path):
+#             original_cwd = hydra.utils.get_original_cwd()
+#             inference_model_path = os.path.join(
+#                 original_cwd, inference_model_path
+#             )
 
-        # Default query or from config
-        query = cfg.get("inference", {}).get("query", "What is 2+3?")
-        max_new_tokens = cfg.get("evaluation_component", {}).get(
-            "eval_max_new_tokens", 128
-        )
+#         # Default query or from config
+#         query = cfg.get("inference", {}).get("query", "What is 2+3?")
+#         max_new_tokens = cfg.get("evaluation_component", {}).get(
+#             "eval_max_new_tokens", 128
+#         )
 
-        logger.info(f"Running inference with model: {inference_model_path}")
-        logger.info(f"Query: {query}")
+#         logger.info(f"Running inference with model: {inference_model_path}")
+#         logger.info(f"Query: {query}")
 
-        inference_demo(
-            model_path=inference_model_path,
-            query=query,
-            max_new_tokens=max_new_tokens,
-        )
-    except Exception as e:
-        logger.error(f"Inference failed: {e}", exc_info=True)
-        # Don't fail the whole pipeline if inference demo fails
-        logger.info("Continuing despite inference failure.")
+#         inference_demo(
+#             model_path=inference_model_path,
+#             query=query,
+#             max_new_tokens=max_new_tokens,
+#         )
+#     except Exception as e:
+#         logger.error(f"Inference failed: {e}", exc_info=True)
+#         # Don't fail the whole pipeline if inference demo fails
+#         logger.info("Continuing despite inference failure.")
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -136,7 +138,7 @@ def main(cfg: DictConfig) -> int:
         # Run inference if configured
         if cfg.get("inference", {}).get("run", False):
             logger.info("Running post-training inference...")
-            run_inference(cfg)
+            # run_inference(cfg)
 
         return 0  # Success
 
