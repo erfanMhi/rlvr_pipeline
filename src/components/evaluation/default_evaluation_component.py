@@ -457,6 +457,117 @@ class DefaultEvaluationComponent(EvaluationComponentInterface):
             tokenizer=tokenizer,
         )
 
+    def _process_single_dataset_evaluation(
+        self,
+        dataset_name: str,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        trainer_state: TrainerState,
+    ) -> None:
+        """Process evaluation for a single dataset."""
+        logger.info(f"Post-training evaluation on: {dataset_name}")
+        try:
+            # Get prompt configuration
+            system_prompt_for_eval = self._get_system_prompt_for_dataset(
+                dataset_name
+            )
+            if system_prompt_for_eval is None:
+                return
+
+            # Prepare dataset
+            eval_dataset_formatted = self._prepare_evaluation_dataset(
+                dataset_name, tokenizer, system_prompt_for_eval
+            )
+            if not eval_dataset_formatted:
+                return
+
+            # Run evaluation
+            markers_for_eval = (
+                self.model_component_instance.get_markers()  # type: ignore
+            )
+            accuracy = evaluate_model_core(
+                model=model,
+                tokenizer=tokenizer,
+                eval_dataset=eval_dataset_formatted,
+                dataset_name_for_logging=dataset_name,
+                markers=markers_for_eval,
+                max_new_tokens=self.config.get("eval_max_new_tokens", 256),
+                eval_batch_size=self.config.get("eval_batch_size", 8),
+            )
+            if wandb.run:
+                wandb.log(
+                    {f"post_train_eval/{dataset_name}_accuracy": accuracy},
+                    step=trainer_state.global_step,
+                )
+        except Exception as e:
+            logger.error(
+                f"Error in on_evaluation_run for {dataset_name}: {e}",
+                exc_info=True,
+            )
+
+    def _get_system_prompt_for_dataset(
+        self, dataset_name: str
+    ) -> Optional[str]:
+        """Get system prompt for a specific dataset."""
+        system_prompts_dict = self.prompts_config.get("system_prompts", {})
+        eval_dataset_prompt_keys_map = self.config.get(
+            "eval_dataset_prompt_keys", {}
+        )
+        default_key = self.config.get("default_eval_prompt_key")
+
+        prompt_key = eval_dataset_prompt_keys_map.get(
+            dataset_name, default_key
+        )
+
+        if not prompt_key:
+            logger.error(
+                f"No prompt key for {dataset_name} and no default in "
+                "on_evaluation_run. Skipping."
+            )
+            return None
+
+        system_prompt_for_eval = system_prompts_dict.get(prompt_key)
+        if system_prompt_for_eval is None:
+            logger.error(
+                f"System prompt for key '{prompt_key}' not found "
+                f"for {dataset_name} in on_evaluation_run. Skipping."
+            )
+            return None
+
+        return str(system_prompt_for_eval)
+
+    def _prepare_evaluation_dataset(
+        self,
+        dataset_name: str,
+        tokenizer: PreTrainedTokenizerBase,
+        system_prompt: str,
+    ) -> Optional[Dataset]:
+        """Prepare evaluation dataset for a specific dataset."""
+        if self.data_component_instance is None:
+            logger.error("Data component instance is None")
+            return None
+
+        eval_dataset_formatted = (
+            self.data_component_instance.load_and_prepare_data(
+                tokenizer=tokenizer,
+                system_prompt=system_prompt,
+                dataset_name_override=dataset_name,
+                split="test",
+            )
+        )
+        num_samples = self.config.get("eval_num_samples")
+        if num_samples and num_samples > 0:
+            eval_dataset_formatted = eval_dataset_formatted.select(
+                range(min(num_samples, len(eval_dataset_formatted)))
+            )
+        if not eval_dataset_formatted or len(eval_dataset_formatted) == 0:
+            logger.info(
+                f"No data for post-train eval on {dataset_name}. Skipping."
+            )
+            return None
+
+        return eval_dataset_formatted
+
     def on_evaluation_run(
         self,
         model: PreTrainedModel,
@@ -482,79 +593,8 @@ class DefaultEvaluationComponent(EvaluationComponentInterface):
             return
 
         for dataset_name in self.config.get("eval_datasets_names", []):
-            logger.info(f"Post-training evaluation on: {dataset_name}")
-            try:
-                system_prompts_dict = self.prompts_config.get(
-                    "system_prompts", {}
-                )
-                eval_dataset_prompt_keys_map = self.config.get(
-                    "eval_dataset_prompt_keys", {}
-                )
-                default_key = self.config.get("default_eval_prompt_key")
+            self._process_single_dataset_evaluation(
+                dataset_name, model, tokenizer, trainer_state
+            )
 
-                prompt_key = eval_dataset_prompt_keys_map.get(
-                    dataset_name, default_key
-                )
-
-                if not prompt_key:
-                    logger.error(
-                        f"No prompt key for {dataset_name} and no default in "
-                        "on_evaluation_run. Skipping."
-                    )
-                    continue
-                system_prompt_for_eval = system_prompts_dict.get(prompt_key)
-                if system_prompt_for_eval is None:
-                    logger.error(
-                        f"System prompt for key '{prompt_key}' not found "
-                        f"for {dataset_name} in on_evaluation_run. Skipping."
-                    )
-                    continue
-
-                markers_for_eval = (
-                    self.model_component_instance.get_markers()  # type: ignore
-                )
-
-                eval_dataset_formatted = (
-                    # type: ignore
-                    self.data_component_instance.load_and_prepare_data(
-                        tokenizer=tokenizer,
-                        system_prompt=system_prompt_for_eval,
-                        dataset_name_override=dataset_name,
-                        split="test",
-                    )
-                )
-                num_samples = self.config.get("eval_num_samples")
-                if num_samples and num_samples > 0:
-                    eval_dataset_formatted = eval_dataset_formatted.select(
-                        range(min(num_samples, len(eval_dataset_formatted)))
-                    )
-                if (
-                    not eval_dataset_formatted
-                    or len(eval_dataset_formatted) == 0
-                ):
-                    logger.info(
-                        f"No data for post-train eval on {dataset_name}. "
-                        "Skipping."
-                    )
-                    continue
-
-                accuracy = evaluate_model_core(
-                    model=model,
-                    tokenizer=tokenizer,
-                    eval_dataset=eval_dataset_formatted,
-                    dataset_name_for_logging=dataset_name,
-                    markers=markers_for_eval,
-                    max_new_tokens=self.config.get("eval_max_new_tokens", 256),
-                    eval_batch_size=self.config.get("eval_batch_size", 8),
-                )
-                if wandb.run:
-                    wandb.log(
-                        {f"post_train_eval/{dataset_name}_accuracy": accuracy},
-                        step=trainer_state.global_step,
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Error in on_evaluation_run for {dataset_name}: {e}",
-                    exc_info=True,
-                )
         logger.info("DefaultEvaluationComponent.on_evaluation_run finished.")
