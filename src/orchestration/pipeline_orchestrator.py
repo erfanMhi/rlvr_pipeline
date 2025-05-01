@@ -1,10 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-# Concrete Components
 from src.components.data.default_data_component import DefaultDataComponent
-
-# Component Interfaces
 from src.components.data.interface import DataComponentInterface
 from src.components.evaluation.default_evaluation_component import (
     DefaultEvaluationComponent,
@@ -337,7 +334,7 @@ class PipelineOrchestrator:
                 self._notify_observers(
                     "on_step_start", step_name="post_train_eval"
                 )
-                
+
                 from transformers import TrainerState
 
                 mock_state = TrainerState()
