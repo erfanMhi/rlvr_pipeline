@@ -28,9 +28,6 @@ from omegaconf import DictConfig, OmegaConf
 
 # Import our pipeline orchestrator
 from src.orchestration.pipeline_orchestrator import PipelineOrchestrator
-
-# from src.train import inference_demo
-# Optional, for inference after training
 from src.utils.custom_hydra_resolvers import register_custom_resolvers
 
 # Register custom OmegaConf resolvers
