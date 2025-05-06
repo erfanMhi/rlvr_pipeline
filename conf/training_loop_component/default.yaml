@@ -1,0 +1,19 @@
+# @package _group_
+_target_: src.components.training_loop.default_training_loop.DefaultTrainingLoopComponent
+# Parameters for DefaultTrainingLoopComponent
+output_dir: "./output/trainer_ckpts_orch_hydra" # Adjusted path for clarity
+learning_rate: 5.0e-5 # Using standard float notation for YAML
+max_steps: 1000
+max_prompt_length: 512
+max_completion_length: ${eval:"${model.max_seq_length} - ${.max_prompt_length}"}
+per_device_train_batch_size: 12
+gradient_accumulation_steps: 1
+warmup_ratio: 0.1
+lr_scheduler_type: "cosine"
+optim_name: "adamw_torch_fused"
+logging_steps: 1
+save_steps: 100
+num_generations: 12
+log_completions_to_wandb: True
+report_to: ["wandb"]
+profile_enabled: False 
