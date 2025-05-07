@@ -1,0 +1,7 @@
+# @package _group_
+_target_: src.components.reward.default_reward_component.DefaultRewardComponent
+
+# TODO: potential new reward features: using llm as a judge for answer checking or customized distance metrics, bertscore, etc
+defaults:
+  - tasks/math_reasoning@_here_
+  - _self_

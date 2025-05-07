@@ -1,0 +1,18 @@
+reward_functions:
+  - category: "answer_matching"
+    type: "finqa_numerical_match"
+    params:
+      exact_match_reward: 3.0
+      no_answer_penalty: -1.0
+      tolerance: "1e-2"
+
+  - category: "format_checking"
+    type: "match_format_approximately"
+    params:
+      per_marker_reward: 0.5
+      per_marker_penalty: -0.5
+
+  - category: "format_checking"
+    type: "match_format_exactly"
+    params:
+      reward_value: 3.0
