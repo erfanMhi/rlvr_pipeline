@@ -1,12 +1,18 @@
-import logging
-from typing import Any, Dict, Optional, Tuple, cast
-
-from transformers import PreTrainedModel, PreTrainedTokenizerBase
-from unsloth import (
+# Import unsloth before transformers for performance optimizations
+from unsloth import (  # isort: skip  # noqa: E402,I100,I201
     FastLanguageModel,  # Assuming unsloth is the primary way to load models
 )
 
+import logging  # noqa: E402,I100,I201
+from typing import Any, Dict, Optional, Tuple, cast
+
 from src.components.model.interface import ModelComponentInterface
+
+from transformers import (  # isort: skip  # noqa: E402,I100,I201
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
+
 
 # Config related functions will be moved/adapted from src.config
 # Model loading/saving functions from src.model
@@ -118,6 +124,7 @@ class DefaultModelComponent(ModelComponentInterface):
         max_seq_length = self.config["max_seq_length"]
         load_in_4bit = self.config.get("load_in_4bit", False)
         load_in_8bit = self.config.get("load_in_8bit", False)
+        fast_inference = self.config.get("fast_inference", True)
         attn_implementation = self.config.get("attn_implementation", "sdpa")
 
         model, tokenizer = FastLanguageModel.from_pretrained(
@@ -125,6 +132,7 @@ class DefaultModelComponent(ModelComponentInterface):
             max_seq_length=max_seq_length,
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
+            fast_inference=fast_inference,
             attn_implementation=attn_implementation,
         )
 
@@ -199,18 +207,18 @@ class DefaultModelComponent(ModelComponentInterface):
                 ),
                 random_state=lora_config.get("random_state", 3407),
                 max_seq_length=self.config.get("max_seq_length"),
-                finetune_vision_layers=lora_config.get(
-                    "finetune_vision_layers", False
-                ),
-                finetune_language_layers=lora_config.get(
-                    "finetune_language_layers", True
-                ),
-                finetune_attention_modules=lora_config.get(
-                    "finetune_attention_modules", True
-                ),
-                finetune_mlp_modules=lora_config.get(
-                    "finetune_mlp_modules", True
-                ),
+                # finetune_vision_layers=lora_config.get(
+                #     "finetune_vision_layers", False
+                # ),
+                # finetune_language_layers=lora_config.get(
+                #     "finetune_language_layers", False
+                # ),
+                # finetune_attention_modules=lora_config.get(
+                #     "finetune_attention_modules", False
+                # ),
+                # finetune_mlp_modules=lora_config.get(
+                #     "finetune_mlp_modules", False
+                # ),
             ),
         )
         return adapted_model
