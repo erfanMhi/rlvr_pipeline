@@ -15,6 +15,8 @@ Usage:
 The pipeline configuration is defined in the `conf` directory and follows the
 structure established by `conf/config.yaml` and its component config groups.
 """
+# Imported in the beginning to make sure it's imported before all modules
+from unsloth import FastLanguageModel  # isort: skip  # noqa: E402,F401,I201,
 
 import builtins
 import logging
