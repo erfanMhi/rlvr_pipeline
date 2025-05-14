@@ -220,83 +220,150 @@ class CustomEvaluationCallback(TrainerCallback):
         ):
             return
 
-        logger.info(
-            f"EvaluationCallback: Evaluating at step {state.global_step}"
-        )
+        # Update step tracking at the beginning to prevent duplicate runs
+        current_step = state.global_step
+        self._last_log_step = current_step if current_step > 0 else 0
+
+        logger.info(f"EvaluationCallback: Evaluating at step {current_step}")
         model.eval()  # type: ignore
+
+        # Run evaluation for all datasets
+        metrics_to_log = self._evaluate_all_datasets(
+            model, tokenizer, current_step
+        )
+
+        # Log metrics to WandB
+        self._log_metrics_to_wandb(metrics_to_log, current_step)
+
+        logger.info(
+            f"EvaluationCallback: Finished eval for step {current_step}"
+        )
+        model.train()  # type: ignore
+
+    def _evaluate_all_datasets(
+        self, model: Any, tokenizer: PreTrainedTokenizerBase, current_step: int
+    ) -> Dict[str, float]:
+        """Evaluate model on all configured datasets."""
+        metrics_to_log = {}
 
         for dataset_name in self.eval_datasets_names:
             try:
-                # Get task name for the current eval dataset
-                # Assumes data_component has get_task_name_for_dataset method
-                system_prompt_for_eval = self.system_prompt
-                if system_prompt_for_eval is None:
-                    logger.error(
-                        f"System prompt for key '{system_prompt_for_eval}' "
-                        f"not found for {dataset_name}. Skipping."
-                    )
-                    continue
-
-                markers_for_eval = self.model_component.get_markers()
-
-                # Load and prepare dataset using DataComponent
-                # load_and_prepare_data returns a Dataset directly, not a tuple
-                eval_dataset_formatted = (
-                    self.data_component.load_and_prepare_data(
-                        tokenizer=tokenizer,
-                        system_prompt=system_prompt_for_eval,
-                        dataset_name_override=dataset_name,
-                        split="test",  # Default to test split for eval
-                    )
+                accuracy = self._evaluate_single_dataset(
+                    model, tokenizer, dataset_name, current_step
                 )
-
-                if self.eval_num_samples and self.eval_num_samples > 0:
-                    eval_dataset_formatted = eval_dataset_formatted.select(
-                        range(
-                            min(
-                                self.eval_num_samples,
-                                len(eval_dataset_formatted),
-                            )
-                        )
-                    )
-
-                if (
-                    not eval_dataset_formatted
-                    or len(eval_dataset_formatted) == 0
-                ):
-                    raise ValueError(
-                        f"No data for {dataset_name} "
-                        f"(step {state.global_step})."
-                    )
+                if accuracy is not None:
+                    metric_name = f"eval/{dataset_name}_accuracy"
+                    metrics_to_log[metric_name] = float(accuracy)
 
             except Exception as e:
                 logger.error(
-                    f"Error preparing {dataset_name} for eval: {e}",
+                    f"Error during evaluation of {dataset_name} at step "
+                    f"{current_step}: {e}",
                     exc_info=True,
                 )
                 continue
 
-            accuracy = evaluate_model_core(
-                model=model,
-                tokenizer=tokenizer,
-                eval_dataset=eval_dataset_formatted,
-                dataset_name_for_logging=dataset_name,
-                markers=markers_for_eval,
-                max_new_tokens=self.eval_max_new_tokens,
-                eval_batch_size=self.eval_batch_size,
-            )
-            if wandb.run:  # Log to wandb if active
-                wandb.log(
-                    {f"eval/{dataset_name}_accuracy": accuracy},
-                    step=state.global_step,
-                )
+        return metrics_to_log
 
-        logger.info(
-            f"EvaluationCallback: Finished eval for step {state.global_step}"
+    def _evaluate_single_dataset(
+        self,
+        model: Any,
+        tokenizer: PreTrainedTokenizerBase,
+        dataset_name: str,
+        current_step: int,
+    ) -> Optional[float]:
+        """Evaluate model on a single dataset."""
+        # Get task name for the current eval dataset
+        system_prompt_for_eval = self.system_prompt
+        if system_prompt_for_eval is None:
+            logger.error(
+                f"System prompt for key '{system_prompt_for_eval}' "
+                f"not found for {dataset_name}. Skipping."
+            )
+            return None
+
+        markers_for_eval = self.model_component.get_markers()
+
+        # Load and prepare dataset using DataComponent
+        eval_dataset_formatted = self.data_component.load_and_prepare_data(
+            tokenizer=tokenizer,
+            system_prompt=system_prompt_for_eval,
+            dataset_name_override=dataset_name,
+            split="test",  # Default to test split for eval
         )
-        model.train()  # type: ignore
-        # Update last_log_step, handle step 0 case for on_train_begin
-        self._last_log_step = state.global_step if state.global_step > 0 else 0
+
+        if self.eval_num_samples and self.eval_num_samples > 0:
+            eval_dataset_formatted = eval_dataset_formatted.select(
+                range(
+                    min(
+                        self.eval_num_samples,
+                        len(eval_dataset_formatted),
+                    )
+                )
+            )
+
+        if not eval_dataset_formatted or len(eval_dataset_formatted) == 0:
+            raise ValueError(
+                f"No data for {dataset_name} (step {current_step})."
+            )
+
+        accuracy = evaluate_model_core(
+            model=model,
+            tokenizer=tokenizer,
+            eval_dataset=eval_dataset_formatted,
+            dataset_name_for_logging=dataset_name,
+            markers=markers_for_eval,
+            max_new_tokens=self.eval_max_new_tokens,
+            eval_batch_size=self.eval_batch_size,
+        )
+
+        # Debug logging
+        logger.info(f"Computed accuracy for {dataset_name}: {accuracy}")
+        return accuracy
+
+    def _log_metrics_to_wandb(
+        self, metrics_to_log: Dict[str, float], current_step: int
+    ) -> None:
+        """Log metrics to WandB in a single batch."""
+        if not metrics_to_log:
+            return
+
+        logger.info(f"Current global_step: {current_step}")
+        logger.info(f"WandB run active: {wandb.run is not None}")
+
+        if wandb.run:  # Log to wandb if active
+            # Get WandB's current step to avoid step conflicts
+            wandb_step = wandb.run.step
+            logger.info(
+                f"Logging to WandB: {list(metrics_to_log.keys())} "
+                f"at trainer step {current_step}, wandb step {wandb_step}"
+            )
+            try:
+                # Let WandB auto-increment step to avoid conflicts with
+                # built-in trainer callbacks
+                if wandb.run is not None:
+                    wandb.log(metrics_to_log, commit=True)
+                    logger.info(
+                        f"Successfully logged {len(metrics_to_log)} "
+                        f"metrics to WandB (auto step)"
+                    )
+                else:
+                    logger.error("WandB run became None during logging")
+            except Exception as e:
+                logger.error(f"Failed to log to WandB: {e}")
+                # Fallback: log to console
+                self._log_metrics_to_console(metrics_to_log, current_step)
+        else:
+            logger.warning("WandB run is None - metrics not being logged!")
+            # Fallback: log to console
+            self._log_metrics_to_console(metrics_to_log, current_step)
+
+    def _log_metrics_to_console(
+        self, metrics_to_log: Dict[str, float], current_step: int
+    ) -> None:
+        """Fallback logging to console when WandB is not available."""
+        for metric_name, value in metrics_to_log.items():
+            print(f"EVAL METRIC: {metric_name}={value} step={current_step}")
 
     def on_train_begin(
         self,
@@ -496,8 +563,7 @@ class DefaultEvaluationComponent(EvaluationComponentInterface):
             )
             if wandb.run:
                 wandb.log(
-                    {f"post_train_eval/{dataset_name}_accuracy": accuracy},
-                    step=trainer_state.global_step,
+                    {f"post_train_eval/{dataset_name}_accuracy": accuracy}
                 )
         except Exception as e:
             logger.error(
