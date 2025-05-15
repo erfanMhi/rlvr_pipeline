@@ -107,7 +107,7 @@ class DefaultTrainingLoopComponent(TrainingLoopInterface):
             "save_steps": self.config.get("save_steps", 500),
             # Evaluation is handled by specific callbacks
             "max_prompt_length": self.config["max_prompt_length"],
-            "num_generations": self.config.get("grpo_num_generations", 10),
+            "num_generations": self.config.get("num_generations", 10),
             "log_completions": self.config.get(
                 "log_completions_to_wandb", False
             ),
@@ -139,6 +139,17 @@ class DefaultTrainingLoopComponent(TrainingLoopInterface):
             logger.error(f"Error initializing GRPOConfig: {e}")
             logger.error(f"GRPOConfig arguments: {grpo_config_args}")
             raise
+
+        logger.info("Training configuration:")
+        logger.info("=" * 50)
+        for key, value in grpo_config_args.items():
+            # Format the value to be more readable
+            if isinstance(value, (list, tuple)):
+                formatted_value = ", ".join(str(v) for v in value)
+            else:
+                formatted_value = str(value)
+            logger.info(f"{key:.<30} {formatted_value}")
+        logger.info("=" * 50)
 
         if not reward_functions:
             logger.warning(

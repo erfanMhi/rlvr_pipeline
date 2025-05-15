@@ -21,19 +21,19 @@ full_finetuning: false # If true, LoRA is disabled.
 # These are applied if full_finetuning is false AND lora_config.use_lora is true.
 lora_config:
   use_lora: true # Master switch for enabling LoRA.
-  r: 16 # LoRA rank
-  lora_alpha: 32 # LoRA alpha scaling factor (often 2*r)
+  r: 8 # LoRA rank
+  lora_alpha: 16 # LoRA alpha scaling factor (often 2*r)
   lora_dropout: 0.0 # Dropout probability for LoRA layers
   lora_bias: "none" # Bias type for LoRA layers ("none", "all", "lora_only")
-  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
   # If null/empty or not specified, Unsloth might use its defaults or it might be required.
   # Check Unsloth documentation for behavior if target_modules is omitted.
   # For some models, Unsloth can infer target_modules.
   # lora_target_modules: null # Explicitly setting to null if Unsloth infers them
-  # finetune_vision_layers: false # For multimodal models
-  # finetune_language_layers: true
-  # finetune_attention_modules: true
-  # finetune_mlp_modules: true
+  finetune_vision_layers: false # For multimodal models
+  finetune_language_layers: true
+  finetune_attention_modules: true
+  finetune_mlp_modules: true
   # random_state: 3407
 
 # --- Centralized Model and Task Configurations ---

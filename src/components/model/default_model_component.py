@@ -207,18 +207,18 @@ class DefaultModelComponent(ModelComponentInterface):
                 ),
                 random_state=lora_config.get("random_state", 3407),
                 max_seq_length=self.config.get("max_seq_length"),
-                # finetune_vision_layers=lora_config.get(
-                #     "finetune_vision_layers", False
-                # ),
-                # finetune_language_layers=lora_config.get(
-                #     "finetune_language_layers", False
-                # ),
-                # finetune_attention_modules=lora_config.get(
-                #     "finetune_attention_modules", False
-                # ),
-                # finetune_mlp_modules=lora_config.get(
-                #     "finetune_mlp_modules", False
-                # ),
+                finetune_vision_layers=lora_config.get(
+                    "finetune_vision_layers", False
+                ),
+                finetune_language_layers=lora_config.get(
+                    "finetune_language_layers", True
+                ),
+                finetune_attention_modules=lora_config.get(
+                    "finetune_attention_modules", True
+                ),
+                finetune_mlp_modules=lora_config.get(
+                    "finetune_mlp_modules", True
+                ),
             ),
         )
         return adapted_model
