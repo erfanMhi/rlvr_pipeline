@@ -1,4 +1,5 @@
 import decimal  # For FinQA
+import json
 import logging
 import re
 from functools import partial, update_wrapper
@@ -62,8 +63,8 @@ def match_format_exactly(
 
     match_format = re.compile(
         rf"^[\s]{{0,}}"
-        rf"{reasoning_start}.+?{reasoning_end}.*?"
-        rf"{solution_start}(.+?){solution_end}"
+        rf"{re.escape(reasoning_start)}.+?{re.escape(reasoning_end)}.*?"
+        rf"{re.escape(solution_start)}(.+?){re.escape(solution_end)}"
         rf"[\s]{{0,}}$",
         flags=re.MULTILINE | re.DOTALL,
     )
@@ -133,10 +134,13 @@ def _calculate_numerical_score_gsm8k(
     wrong_penalty: float,
 ) -> float:
     """Helper for numerical score calculation in GSM8K."""
+    # Check for exact match first
+    if guess_val == true_val:
+        return correct_reward
+
     if true_val == 0:
-        return (
-            numerical_close_reward_strong if guess_val == 0 else wrong_penalty
-        )
+        return wrong_penalty  # Non-zero guess when answer is 0
+
     ratio = guess_val / true_val
     if 0.9 <= ratio <= 1.1:
         return numerical_close_reward_strong
@@ -201,15 +205,24 @@ def check_answer_gsm8k(
 
 CURRENCY_RE = re.compile(r"[$€,£¥]")
 PERCENT_RE = re.compile(r"%")
-PARENS_RE = re.compile(r"^\\((.*)\\)$")
+PARENS_RE = re.compile(r"^\((.+)\)$")
 
 
 def _canon_finqa(num_str_in: Any) -> decimal.Decimal:
     num_str = str(num_str_in).strip()
+
+    # Remove currency symbols (including at the end)
     num_str = CURRENCY_RE.sub("", num_str)
+    # Remove percent signs
     num_str = PERCENT_RE.sub("", num_str)
+
+    # Handle parentheses for negative numbers (accounting format)
     if m := PARENS_RE.match(num_str):
         num_str = "-" + m.group(1)
+
+    # Remove any remaining whitespace and commas for thousands
+    num_str = num_str.replace(" ", "").replace(",", "")
+
     try:
         return decimal.Decimal(num_str)
     except decimal.InvalidOperation:
@@ -351,8 +364,8 @@ def check_numbers(
             scores.append(no_match_score)
             continue
         try:
-            true_val = float(true_answer_str.strip())
-            guess_val = float(extracted_guess_str.strip())
+            true_val = float(true_answer_str.strip().replace(",", ""))
+            guess_val = float(extracted_guess_str.strip().replace(",", ""))
             scores.append(
                 match_score if guess_val == true_val else no_match_score
             )
@@ -450,8 +463,8 @@ class DefaultRewardComponent(RewardComponentInterface):
 
             number_extraction_regex_str = (
                 rf"{re.escape(solution_start_marker)}"
-                # Allow neg sign, digits, optional decimal, more digits
-                rf".*?(-?[\d\.,]+\d)"  # Capture group 1 for the number
+                # Match numbers: -123, 123.45, 1,234, 1,234.56, 1.5e6, etc.
+                rf".*?(-?\d+(?:,\d{{3}})*(?:\.\d+)?(?:[eE][+-]?\d+)?)"
             )
             number_extraction_pattern = re.compile(
                 number_extraction_regex_str, flags=re.MULTILINE | re.DOTALL
@@ -522,7 +535,10 @@ class DefaultRewardComponent(RewardComponentInterface):
 
         pipelines: List[Callable[..., Any]] = []
 
-        logger.info(f"Reward functions used: {reward_functions}")
+        logger.info(
+            "Reward functions used:\n%s",
+            json.dumps(reward_functions, indent=2, ensure_ascii=False),
+        )
 
         for fn_config in reward_functions:
             category = fn_config.get(
