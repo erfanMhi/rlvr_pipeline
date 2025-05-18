@@ -1,5 +1,4 @@
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "python.formatting.provider": "black",
     "python.formatting.blackPath": "black",
     "editor.formatOnSave": true,
@@ -19,5 +18,8 @@
             79
         ]
     },
-    "python.poetryPath": "poetry"
+    "python.poetryPath": "poetry",
+    "python.debugging.justMyCode": false,
+    "debug.allowBreakpointsEverywhere": true,
+    "python.terminal.activateEnvironment": true
 }
