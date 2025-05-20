@@ -1,157 +1,124 @@
-# 🎨 Python Code Style Template
+# 🧠 RLVR Training Pipeline
 
-A robust template for enforcing consistent code style and linting in Python projects.
+A **composable component orchestrator** for **Reinforcement Learning from Verifiable Rewards (RLVR)** training of Large Language Models on reasoning tasks.
 
-## ✨ Overview
+## 🎯 Key Features
 
-This template provides a standardized foundation for maintaining clean, consistent Python code across your projects. It includes pre-configured linting and code style enforcement tools to ensure your codebase remains maintainable and professional.
-
-## 🚀 Features
-
-- Pre-configured linting setup
-- Code style enforcement
-- Python best practices
-- Poetry for dependency management
-- MIT Licensed for maximum flexibility
+- **RLVR Specialization**: Built for reasoning tasks with verifiable outcomes
+- **Zero-Code Configuration**: Train models by modifying YAML configs only  
+- **GRPO Implementation**: Generative Reward in Policy Optimization
+- **Verifiable Rewards**: Mathematical correctness, format compliance
+- **Modular Architecture**: Swappable components for rapid experimentation
 
 ## 📦 Installation
 
-1. Clone this repository:
 ```bash
-git clone https://github.com/your-username/code-style-template.git
-```
-
-2. Install Poetry (if you haven't already):
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-```
-
-3. Install dependencies using Poetry:
-```bash
-cd code-style-template
-poetry install
-```
-
-## 🛠️ Usage
-
-Use this template as a starting point for your Python projects to maintain consistent code quality:
-
-1. Copy the configuration files to your project
-2. Install dependencies with `poetry install`
-3. Activate the virtual environment with `poetry shell`
-4. Start coding with automatic style enforcement!
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch
-3. Install dependencies with `poetry install`
-4. Make your changes
-5. Run tests and linting
-6. Commit your changes
-7. Push to the branch
-8. Open a Pull Request
-
-## ⭐ Support
-
-If you find this template useful, please consider giving it a star!
-
-# GSM8K GRPO Training
-
-This repository contains modularized code for training language models on the GSM8K dataset using the GRPO (Generative Reward in Policy Optimization) approach.
-
-## Features
-
-- Fine-tuning LLMs on math reasoning tasks using GRPO
-- Modular design following PEP8 standards
-- Poetry for dependency management
-- Support for various model architectures
-- Custom reward functions targeting math reasoning
-- Inference capabilities for testing trained models
-
-## Installation
-
-This project uses Poetry for dependency management:
-
-```bash
-# Install poetry if you don't have it already
+# Install Poetry
 curl -sSL https://install.python-poetry.org | python3 -
 
 # Install dependencies
 poetry install
 ```
 
-## Project Structure
+## 🚀 Quick Start
 
-- `src/`: Main package
-  - `model.py`: Model initialization and LoRA configuration
-  - `data.py`: Dataset loading and processing
-  - `rewards.py`: Reward functions for GRPO
-  - `config.py`: Training configuration and constants
-  - `inference.py`: Inference utilities 
-  - `train.py`: Main training logic
-
-- `train_gsm8k.py`: Command-line script to run training
-- `inference.py`: Command-line script to run inference
-
-## Usage
-
-### Training
-
-To train a model with default parameters:
+### Basic Training
 
 ```bash
-poetry run python train_gsm8k.py
+# Train on GSM8K with default GRPO configuration
+poetry run python run_pipeline.py
+
+# Custom configuration
+poetry run python run_pipeline.py \
+  model.model_name_or_path="unsloth/gemma-3-1b-it" \
+  train.max_steps=500 \
+  train.learning_rate=1e-5
 ```
 
-With custom parameters:
+### Configuration-Only Experiments
 
 ```bash
-poetry run python train_gsm8k.py \
-  --model_name "unsloth/gemma-3-4b-it-unsloth-bnb-4bit" \
-  --max_seq_length 2048 \
-  --load_in_4bit \
-  --output_dir "outputs/gemma-4b" \
-  --save_model_path "gemma-4b" \
-  --run_inference
+# Switch datasets
+python run_pipeline.py data_component=finqa
+
+# Adjust reward weights  
+python run_pipeline.py \
+  reward.reward_functions[0].params.correct_reward=5.0
+
+# Memory-efficient training
+python run_pipeline.py \
+  model.load_in_4bit=true \
+  train.per_device_train_batch_size=8
 ```
 
-### Inference
+## 🏗️ Architecture
 
-To run inference with a trained model:
+The pipeline consists of 6 composable components:
 
-```bash
-poetry run python inference.py \
-  --model_path "gemma-3" \
-  --query "Janet's ducks lay 16 eggs per day. She eats 3 for breakfast every morning and bakes muffins for her friends every day with 4 eggs. How many eggs does she have left each day?" \
-  --max_new_tokens 256
+1. **Data Component**: Dataset loading and preprocessing (GSM8K, FinQA)
+2. **Model Component**: Model initialization, LoRA adapters, quantization
+3. **Training Loop**: GRPO algorithm implementation
+4. **Reward Component**: Verifiable reward functions for reasoning
+5. **Evaluation Component**: In-training and post-training evaluation
+6. **Observer Component**: Experiment tracking (W&B integration)
+
+## 📊 Supported Tasks
+
+### Mathematical Reasoning
+- **GSM8K**: Grade school math word problems
+- **FinQA**: Financial reasoning and calculation
+
+### Reward Types
+- **Answer Matching**: Numerical correctness verification
+- **Format Checking**: Structured reasoning compliance
+- **Custom Rewards**: Extensible reward function system
+
+## 🔧 Configuration
+
+All behavior is controlled through Hydra YAML configurations:
+
+```yaml
+# conf/config.yaml
+defaults:
+  - data_component@data: default
+  - model_component@model: default  
+  - training_loop_component@train: default
+  - reward_component@reward: default
+  - evaluation_component@eval: default
+  - prompts@prompts: math_reasoning
 ```
 
-## Customization
+See [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for detailed configuration options.
 
-You can customize various aspects of the training:
+## 📚 Documentation
 
-- Model architecture by changing the `model_name` parameter
-- LoRA parameters in `model.py`
-- Reward functions in `rewards.py` 
-- Training configuration in `config.py`
-- System prompt and reasoning markers in `config.py`
+- [**ARCHITECTURE.md**](ARCHITECTURE.md): System design and component details
+- [**COMPONENT_GUIDE.md**](COMPONENT_GUIDE.md): Component development guide
+- [**CONFIGURATION_GUIDE.md**](CONFIGURATION_GUIDE.md): Configuration reference
 
-## Profiling and Optimization
-nsys profile \
-  --trace=cuda,nvtx,osrt,cudnn,cublas \
-  --cuda-memory-usage=true \
-  --output=nv_report.qdrep \
-  --force-overwrite=true \
-  --stats=true \
-  python main.py
+## 🔬 Research Focus
 
-## License
+This pipeline is optimized for **RLVR** (Reinforcement Learning from Verifiable Rewards) rather than traditional RLHF. Key differences:
 
-See the LICENSE file for more information.
+- **Verifiable Outcomes**: Rewards computed from objective correctness
+- **Reasoning Tasks**: Structured mathematical and logical reasoning
+- **Format Compliance**: Reward structured thinking patterns
+- **Deterministic Evaluation**: Reproducible reward calculation
+
+
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Follow component development patterns in [COMPONENT_GUIDE.md](COMPONENT_GUIDE.md)
+4. Add tests for new components
+5. Submit pull request
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+**Built for reasoning. Configured for research. Optimized for results.**
