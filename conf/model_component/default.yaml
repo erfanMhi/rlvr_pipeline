@@ -1,0 +1,56 @@
+# @package _group_
+_target_: src.components.model.default_model_component.DefaultModelComponent
+
+# Parameters for DefaultModelComponent
+model_name_or_path: "unsloth/gemma-3-1b-it" # Specifies the model to be loaded
+max_seq_length: 1536 # Maximum sequence length for the model and tokenizer
+load_in_4bit: False # Whether to load the model in 4-bit precision
+load_in_8bit: False # Whether to load the model in 8-bit precision
+fast_inference: True # Whether to enable fast inference optimizations
+# attn_implementation: "sdpa" # Optional: "flash_attention_2" or "sdpa"
+
+# This 'markers' key will be populated by the custom resolver based on the
+# active 'model_name_or_path' and its entry in 'available_model_specific_configs'.
+markers: ${get_model_markers_dict:}
+
+# Fine-tuning strategy
+full_finetuning: false # If true, LoRA is disabled.
+                       # If false, LoRA specific config below is used if lora_config.use_lora is true.
+
+# LoRA (Low-Rank Adaptation) specific configurations
+# These are applied if full_finetuning is false AND lora_config.use_lora is true.
+lora_config:
+  use_lora: true # Master switch for enabling LoRA.
+  r: 8 # LoRA rank
+  lora_alpha: 16 # LoRA alpha scaling factor (often 2*r)
+  lora_dropout: 0.0 # Dropout probability for LoRA layers
+  lora_bias: "none" # Bias type for LoRA layers ("none", "all", "lora_only")
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  # If null/empty or not specified, Unsloth might use its defaults or it might be required.
+  # Check Unsloth documentation for behavior if target_modules is omitted.
+  # For some models, Unsloth can infer target_modules.
+  # lora_target_modules: null # Explicitly setting to null if Unsloth infers them
+  finetune_vision_layers: false # For multimodal models
+  finetune_language_layers: true
+  finetune_attention_modules: true
+  finetune_mlp_modules: true
+  # random_state: 3407
+
+# --- Centralized Model and Task Configurations ---
+
+# All available model-specific configurations.
+# Keys should match possible 'model_name_or_path' values.
+available_model_specific_configs:
+  "unsloth/gemma-3-1b-it":
+    markers:
+      reasoning_start: "<start_working_out>"
+      reasoning_end: "<end_working_out>"
+      solution_start: "<SOLUTION>"
+      solution_end: "</SOLUTION>"
+
+
+prompt_templates:
+  prompts: financial_reasoning
+
+
+save_model_path: "./output/model_output_hydra" 

@@ -1,66 +1,28 @@
 defaults:
-  - _self_
+  - data_component@data: default
+  - model_component@model: default
+  - reward_component@reward: default
+  - training_loop_component@train: default
+  - evaluation_component@eval: default
+  - prompts@prompts: math_reasoning # Add prompts to defaults, pointing to the 'default.yaml' in the 'prompts' group
+  - _self_ # Allows overriding defaults and parameters from CLI
+  # For observers, we define a list directly in this config.
+  # Each item in the list must have a _target_ key for instantiation.
 
-model:
-  name: unsloth/gemma-3-1b-it
-  max_seq_length: 1536
-  max_prompt_length: 1024
-  load_in_4bit: false
-  load_in_8bit: false
+# Top-level pipeline parameters
+logging_level: INFO
+log_dir: outputs
 
-data:
-  train_dataset_name: finqa # gsm8k, finqa
-  eval_datasets: ["finqa"]
-
-optimizer:
-  name: adamw_torch_fused
-  learning_rate: 5.0e-6
-  adam_beta1: 0.9
-  adam_beta2: 0.99
-  weight_decay: 0.1
-
-training:
-  full_finetuning: false
-  # output_dir is managed by Hydra's hydra.run.dir setting below
-  # This key is kept for compatibility if some part of the code still expects it,
-  # but the primary output location is determined by hydra.run.dir.
-  output_dir: outputs 
-  save_model_name: gemma-3 # Name for the final saved model folder (relative to hydra run dir)
-  trainer_internal_output_dir: "trainer_checkpoints" # Subdir for trainer's own checkpoints
-  profile: false
-  warmup_ratio: 0.1
-  lr_scheduler_type: cosine
-  logging_steps: 1
-  per_device_train_batch_size: 8
-  gradient_accumulation_steps: 1
-  max_steps: 8000 # Consider increasing for actual runs
-  save_steps: 250
-  max_grad_norm: 0.1
-  report_to: ["wandb"]
-  log_completions_to_wandb: true # For GRPOConfig
-
-grpo:
-  num_generations: 8
-
-evaluation:
-  enabled: true
-  steps: 100
-  num_samples: null # null for all samples
-  batch_size: 256
-  max_new_tokens: 1024 # This was already here
-
-wandb:
-  project: finqa-grpo-v3
-
-# Hydra settings
-hydra:
-  run:
-    # Hydra's default output subdir pattern: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    # base_output_dir below can be used to change the "outputs" part if needed.
-    dir: ${training.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  sweep:
-    dir: ${training.output_dir}/multirun/${now:%Y-%m-%d_%H-%M-%S}
-    subdir: ${hydra.job.num}
+# Observers configuration
+# Each item in the list needs a _target_ for Hydra's instantiation.
+# The WandbObserver specifically expects its parameters under a 'config' key.
+observers:
+  - _target_: src.components.observers.wandb_observer.WandbObserver
+    config: # This 'config' key is specific to how WandbObserver is structured
+      wandb_project: "grpo_refactor_test_hydra"
+      wandb_entity: null # Specify your W&B entity if not using default
+      wandb_run_name: "grpo_${now:%Y%m%d_%H%M%S}"
+      log_config_to_wandb: True
 
 inference:
   run: false

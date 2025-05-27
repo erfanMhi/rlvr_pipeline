@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: "Format Python files with Black (79-char limit)"
+globs: ["*.py"]
+alwaysApply: true
+---
+
+# Black Formatting
+- Ensure no line exceeds 79 characters.

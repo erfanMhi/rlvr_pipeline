@@ -196,6 +196,7 @@ override.tf.json
 wandb/
 unsloth_compiled_cache/
 outputs/
+output/
 nohup*.out
 shutdown_log.txt
 gemma-3/*

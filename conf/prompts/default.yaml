@@ -1,0 +1,22 @@
+prompting_mode: reasoning_mode
+
+system_prompts:
+  reasoning_mode: >
+    You are given a problem to solve.
+    First, provide your reasoning and thought process to arrive at
+    the final answer. Place your reasoning between ${get_marker:reasoning_start}
+    and ${get_marker:reasoning_end}.
+
+    Then, provide the final answer to the problem based on the
+    provided information directly between ${get_marker:solution_start} and
+    ${get_marker:solution_end}.
+  normal_mode: >
+    You are a helpful assistant. Provide clear, concise answers to the given
+    problem. Focus on delivering the most relevant information directly
+    without unnecessary elaboration.
+
+tool_use_prompt: >
+  You have access to a set of tools. When a query requires external data
+  (e.g., current stock prices, exchange rates) or complex calculations,
+  indicate tool usage by saying: TOOL_REQUEST: [ToolName(param1=value1, param2=value2)].
+  If no tool is needed, respond directly.
