@@ -6,6 +6,8 @@ from unsloth import (  # isort: skip  # noqa: E402,I100,I201
 import logging  # noqa: E402,I100,I201
 from typing import Any, Dict, Optional, Tuple, cast
 
+from omegaconf import DictConfig
+
 from src.components.model.interface import ModelComponentInterface
 
 from transformers import (  # isort: skip  # noqa: E402,I100,I201
@@ -94,10 +96,11 @@ class DefaultModelComponent(ModelComponentInterface):
             return False
 
         lora_config = self.config.get("lora_config", {})
-        if not isinstance(lora_config, dict):  # Ensure lora_config is a dict
-            logger.error("'lora_config' must be a dictionary.")
+        if not isinstance(
+            lora_config, (dict, DictConfig)
+        ):  # Ensure lora_config is a dict or DictConfig
+            logger.error("'lora_config' must be a dictionary or DictConfig.")
             return False
-
         if not self.config.get("full_finetuning", False) and lora_config.get(
             "use_lora", False
         ):
@@ -134,6 +137,7 @@ class DefaultModelComponent(ModelComponentInterface):
             load_in_8bit=load_in_8bit,
             fast_inference=fast_inference,
             attn_implementation=attn_implementation,
+            full_finetuning=self.config.get("full_finetuning", False),
         )
 
         self._model = model
@@ -225,10 +229,10 @@ class DefaultModelComponent(ModelComponentInterface):
 
     def get_markers(self) -> Dict[str, str]:
         markers = self.config.get("markers", {})
-        if not isinstance(markers, dict):
+        if not isinstance(markers, (dict, DictConfig)):
             logger.warning(
-                f"Markers in config is not a dict, but {type(markers)}. "
-                f"Returning empty dict."
+                f"Markers in config is not a dict or DictConfig, but "
+                f"{type(markers)}. Returning empty dict."
             )
             return {}
         # Ensure all keys and values in markers are strings for Dict[str, str]
