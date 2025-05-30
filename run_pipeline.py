@@ -54,48 +54,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# def run_inference(cfg: DictConfig, model_path: Optional[str] = None) -> None:
-#     """Run inference with the trained model."""
-#     if not cfg.get("inference", {}).get("run", False):
-#         logger.info("Inference disabled in configuration. Skipping.")
-#         return
+def validate_hydra_config(cfg: DictConfig) -> bool:
+    """Validate that all required components have proper _target_ keys.
 
-#     try:
-#         # Use model_path if provided, otherwise get from config
-#         inference_model_path = model_path or cfg.model_component.get(
-#             "save_model_path"
-#         )
+    Args:
+        cfg: The Hydra configuration object
 
-#         if not inference_model_path:
-#             logger.warning("No model path set for inference. Skipping.")
-#             return
+    Returns:
+        True if configuration is valid, False otherwise
+    """
+    required_components = ["data", "model", "reward", "train"]
 
-#         # Resolve path if relative - ensures correct path resolution
-#         # regardless of Hydra's output dir
-#         if not os.path.isabs(inference_model_path):
-#             original_cwd = hydra.utils.get_original_cwd()
-#             inference_model_path = os.path.join(
-#                 original_cwd, inference_model_path
-#             )
+    for component in required_components:
+        if component not in cfg:
+            logger.error(f"Missing {component} component configuration")
+            return False
 
-#         # Default query or from config
-#         query = cfg.get("inference", {}).get("query", "What is 2+3?")
-#         max_new_tokens = cfg.get("evaluation_component", {}).get(
-#             "eval_max_new_tokens", 128
-#         )
+        if "_target_" not in cfg[component]:
+            logger.error(f"Missing _target_ key in {component} configuration")
+            return False
 
-#         logger.info(f"Running inference with model: {inference_model_path}")
-#         logger.info(f"Query: {query}")
+    # Validate observers if present
+    observers = cfg.get("observers", [])
+    for i, observer in enumerate(observers):
+        if "_target_" not in observer:
+            logger.error(
+                f"Missing _target_ key in observer configuration at index {i}"
+            )
+            return False
 
-#         inference_demo(
-#             model_path=inference_model_path,
-#             query=query,
-#             max_new_tokens=max_new_tokens,
-#         )
-#     except Exception as e:
-#         logger.error(f"Inference failed: {e}", exc_info=True)
-#         # Don't fail the whole pipeline if inference demo fails
-#         logger.info("Continuing despite inference failure.")
+    logger.info("Configuration validation passed")
+    return True
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -107,6 +96,11 @@ def main(cfg: DictConfig) -> int:
         logger.info(OmegaConf.to_yaml(cfg))
     else:
         logger.info("Starting pipeline with Hydra configuration")
+
+    # Validate configuration structure
+    if not validate_hydra_config(cfg):
+        logger.error("Configuration validation failed. Exiting.")
+        return 1
 
     # Log paths for clarity - helps troubleshoot file paths during execution
     logger.info(f"Project root: {hydra.utils.get_original_cwd()}")
