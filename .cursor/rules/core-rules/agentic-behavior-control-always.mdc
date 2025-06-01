@@ -1,0 +1,9 @@
+- Always suggest a detailed plan before executing any agentic behavior and wait for explicit permission or edits
+- Break complex tasks into clear, actionable steps in the plan
+- Provide reasoning for each step in the proposed plan
+- Present the plan in a structured format with numbered steps and clear objectives
+- Ask for confirmation or modifications to the plan before proceeding
+description: "Plan before executing any agentic behavior"
+globs:
+alwaysApply: true
+---
