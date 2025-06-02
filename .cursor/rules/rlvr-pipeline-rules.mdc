@@ -1,0 +1,36 @@
+# RLVR Pipeline Coding Rules (Concise)
+
+## Python
+- Format with Black, 79-char lines.
+- Use isort (Black profile) for imports.
+- Use type hints for all functions; no untyped defs (mypy strict).
+- Use Google-style docstrings for public methods/classes.
+- Use double quotes for strings.
+- Follow PEP8 for style and import order.
+
+## Structure
+- All components inherit from `BaseComponent` and implement `validate_config()`.
+- Organize code in `src/components/`, `src/orchestration/`, `src/utils/`.
+- Configs live in `conf/`, use Hydra `_target_` for instantiation.
+
+## Configuration
+- All behavior is config-driven (YAML in `conf/`).
+- Validate configs in each component.
+
+## Quality & Workflow
+- Use pre-commit hooks: black, isort, flake8, mypy.
+- Use Poetry for dependency management.
+- Never hardcode secrets; use environment variables.
+
+## Naming
+- snake_case for files/functions, PascalCase for classes, kebab-case for YAML.
+
+## Git
+- Use feature branches, atomic commits, and pull requests.
+
+## Quick Commands
+- Run format: `poetry run black src/ tests/`
+- Run lint: `poetry run flake8 src/ tests/`
+- Run type check: `poetry run mypy src/`
+- Run tests: `poetry run pytest`
+- Run pipeline: `python run_pipeline.py`
