@@ -1,10 +1,11 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from datasets import Dataset, Features, Sequence, Value, load_dataset
-from transformers import PreTrainedTokenizerBase
+from omegaconf import DictConfig, ListConfig
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from src.components.data.interface import DataComponentInterface
 
@@ -296,6 +297,25 @@ class DefaultDataComponent(DataComponentInterface):
         if not self._processor:
             # Processor instantiation failure logged in __init__
             return False
+
+        # Validate processor_config if present
+        processor_config = self.config.get("processor_config", {})
+        if processor_config and not isinstance(
+            processor_config, (dict, DictConfig)
+        ):
+            logger.error(
+                "'processor_config' must be a dictionary or DictConfig."
+            )
+            return False
+
+        # Validate dataset_config_name if present
+        dataset_config_name = self.config.get("dataset_config_name")
+        if dataset_config_name is not None and not isinstance(
+            dataset_config_name, str
+        ):
+            logger.error("'dataset_config_name' must be a string or None.")
+            return False
+
         return self._processor.validate_config()
 
     def load_and_prepare_data(

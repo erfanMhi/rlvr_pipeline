@@ -15,7 +15,7 @@ markers: ${get_model_markers_dict:}
 
 # Fine-tuning strategy
 full_finetuning: false # If true, LoRA is disabled.
-                       # If false, LoRA specific config below is used if lora_config.use_lora is true.
+                      # If false, LoRA specific config below is used if lora_config.use_lora is true.
 
 # LoRA (Low-Rank Adaptation) specific configurations
 # These are applied if full_finetuning is false AND lora_config.use_lora is true.

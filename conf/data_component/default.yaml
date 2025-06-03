@@ -1,6 +1,6 @@
 # @package _group_
 _target_: src.components.data.default_data_component.DefaultDataComponent
-# Parameters for DefaultDataComponent, formerly under 'config' in the orchestrator
+
 dataset_name: "gsm8k"
 dataset_path: "openai/gsm8k"
 dataset_config_name: "main"

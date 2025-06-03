@@ -1,5 +1,6 @@
 # @package _group_
 _target_: src.components.training_loop.default_training_loop.DefaultTrainingLoopComponent
+
 # Parameters for DefaultTrainingLoopComponent
 output_dir: "./output/trainer_ckpts_orch_hydra" # Adjusted path for clarity
 learning_rate: 5e-6 # Using standard float notation for YAML
@@ -15,5 +16,5 @@ logging_steps: 1
 save_steps: 50
 num_generations: 16
 log_completions_to_wandb: True
-report_to: ["wandb"]
+report_to: "wandb"
 profile_enabled: False 

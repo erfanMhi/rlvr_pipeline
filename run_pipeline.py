@@ -23,7 +23,6 @@ import logging
 import math
 import os
 import sys
-from typing import Any, Dict
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -109,18 +108,10 @@ def main(cfg: DictConfig) -> int:
     # Track whether the pipeline was successful (for return code)
     pipeline_success = False
 
-    # Using Dict[str, Any] for broader compatibility
-    resolved_config: Any = OmegaConf.to_container(cfg, resolve=True)
-    if not isinstance(resolved_config, dict):
-        raise TypeError(
-            f"Expected configuration to be a dict, got {type(resolved_config)}"
-        )
-    config: Dict[str, Any] = resolved_config
-
     try:
         # Instantiate and run the pipeline orchestrator
         logger.info("Initializing PipelineOrchestrator...")
-        orchestrator = PipelineOrchestrator(config)
+        orchestrator = PipelineOrchestrator(cfg)
 
         logger.info("Starting pipeline execution...")
         orchestrator.run()
@@ -151,23 +142,40 @@ def main(cfg: DictConfig) -> int:
             logger.warning("❌ Pipeline did not complete successfully")
 
         # Log the location of Hydra's output directory
-        if hydra.core.hydra_config.HydraConfig.initialized():
-            output_dir = (
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-            )
-            logger.info(f"Hydra output directory: {output_dir}")
-            # Optionally create a symlink to the latest run for convenience
+        try:
+            # Use a safer approach to check Hydra initialization
+            # Try to access Hydra's runtime configuration safely
             try:
-                latest_link = os.path.join(
-                    hydra.utils.get_original_cwd(), "outputs/latest"
+                from hydra.core.hydra_config import HydraConfig
+
+                if HydraConfig.initialized():
+                    output_dir = HydraConfig.get().runtime.output_dir
+                    logger.info(f"Hydra output directory: {output_dir}")
+                    # Optionally create a symlink to the latest run for
+                    # convenience
+                    try:
+                        latest_link = os.path.join(
+                            hydra.utils.get_original_cwd(), "outputs/latest"
+                        )
+                        if os.path.exists(latest_link):
+                            os.remove(latest_link)
+                        os.makedirs(
+                            os.path.dirname(latest_link), exist_ok=True
+                        )
+                        os.symlink(output_dir, latest_link)
+                        logger.info(
+                            f"Created symlink to latest run: {latest_link}"
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            f"Could not create latest run symlink: {e}"
+                        )
+            except ImportError:
+                logger.debug(
+                    "Hydra core not available for output directory logging"
                 )
-                if os.path.exists(latest_link):
-                    os.remove(latest_link)
-                os.makedirs(os.path.dirname(latest_link), exist_ok=True)
-                os.symlink(output_dir, latest_link)
-                logger.info(f"Created symlink to latest run: {latest_link}")
-            except Exception as e:
-                logger.debug(f"Could not create latest run symlink: {e}")
+        except Exception:
+            logger.debug("Could not access Hydra output directory information")
 
 
 if __name__ == "__main__":

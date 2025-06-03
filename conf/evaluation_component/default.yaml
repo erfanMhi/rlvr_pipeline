@@ -1,5 +1,6 @@
 # @package _group_
 _target_: src.components.evaluation.default_evaluation_component.DefaultEvaluationComponent
+
 # Parameters for DefaultEvaluationComponent
 enabled: True # This can be used to conditionally instantiate or run the component
 eval_datasets_names: ["gsm8k"]

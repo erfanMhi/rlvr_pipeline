@@ -5,6 +5,8 @@ import re
 from functools import partial, update_wrapper
 from typing import Any, Callable, Dict, List, Optional
 
+from omegaconf import DictConfig, ListConfig, OmegaConf
+
 from src.components.reward.interface import RewardComponentInterface
 
 logger = logging.getLogger(__name__)
@@ -383,10 +385,45 @@ class DefaultRewardComponent(RewardComponentInterface):
         self.reward_configs = self.config.get("reward_functions", {})
 
     def validate_config(self) -> bool:
-        if not isinstance(self.reward_configs, list):
-            logger.error("'reward_functions' in config must be a list.")
+        if not isinstance(self.reward_configs, (list, ListConfig)):
+            logger.error(
+                "'reward_functions' in config must be a list or ListConfig."
+            )
             return False
-        # Further validation of individual reward configs can be added here
+
+        # Validate individual reward function configs
+        for i, reward_config in enumerate(self.reward_configs):
+            if not isinstance(reward_config, (dict, DictConfig)):
+                logger.error(
+                    f"Reward function config at index {i} must be a dict or "
+                    f"DictConfig, got {type(reward_config)}."
+                )
+                return False
+
+            # Check required fields for each reward function
+            if not reward_config.get("type"):
+                logger.error(
+                    f"Reward function config at index {i} missing 'type' "
+                    f"field."
+                )
+                return False
+
+            if not reward_config.get("category"):
+                logger.error(
+                    f"Reward function config at index {i} missing 'category' "
+                    f"field."
+                )
+                return False
+
+            # Validate params if present
+            params = reward_config.get("params", {})
+            if params and not isinstance(params, (dict, DictConfig)):
+                logger.error(
+                    f"Reward function params at index {i} must be a dict or "
+                    f"DictConfig, got {type(params)}."
+                )
+                return False
+
         return True
 
     def _build_answer_matching_reward_fn(
@@ -526,6 +563,10 @@ class DefaultRewardComponent(RewardComponentInterface):
         if reward_functions is None:
             reward_functions = self.reward_configs
 
+        if not reward_functions:
+            logger.warning("No reward functions configured")
+            return []
+
         if model_info is None:
             raise ValueError("model_info is required")
 
@@ -535,9 +576,11 @@ class DefaultRewardComponent(RewardComponentInterface):
 
         pipelines: List[Callable[..., Any]] = []
 
+        fn_prints = OmegaConf.to_container(reward_functions, resolve=True)
+
         logger.info(
             "Reward functions used:\n%s",
-            json.dumps(reward_functions, indent=2, ensure_ascii=False),
+            json.dumps(fn_prints, indent=2, ensure_ascii=False),
         )
 
         for fn_config in reward_functions:

@@ -14,6 +14,7 @@ class WandbObserver(ObserverInterface):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
+        # Config is now directly accessible (restructured at instantiation)
         self.wandb_project = self.config.get(
             "wandb_project", "default_grpo_project"
         )
@@ -28,6 +29,33 @@ class WandbObserver(ObserverInterface):
                 "WandbObserver config must include 'wandb_project' name."
             )
             return False
+
+        # Validate wandb_project is a string
+        if not isinstance(self.wandb_project, str):
+            logger.error("'wandb_project' must be a string.")
+            return False
+
+        # Validate wandb_entity if present
+        if self.wandb_entity is not None and not isinstance(
+            self.wandb_entity, str
+        ):
+            logger.error("'wandb_entity' must be a string or None.")
+            return False
+
+        # Validate wandb_run_name if present
+        if self.wandb_run_name is not None and not isinstance(
+            self.wandb_run_name, str
+        ):
+            logger.error("'wandb_run_name' must be a string or None.")
+            return False
+
+        # Validate log_config_to_wandb if present
+        if hasattr(self, "log_config") and not isinstance(
+            self.log_config, bool
+        ):
+            logger.error("'log_config_to_wandb' must be a boolean.")
+            return False
+
         # wandb.login() should have been called externally if API key needed.
         return True
 

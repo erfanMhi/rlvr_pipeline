@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 from omegaconf import DictConfig, MissingMandatoryValue, OmegaConf
 
 
@@ -99,41 +101,32 @@ def get_marker_resolver(marker_key: str, *, _root_: DictConfig) -> str:
         return f"{{MARKER_ERR:Unexpected_{type(e).__name__}}}"
 
 
-def get_model_markers_dict_resolver(*, _root_: DictConfig) -> DictConfig:
-    """Resolves the entire markers dictionary for the current model.
+def _get_model_markers_dict(_root_: DictConfig) -> Dict[str, Any]:
+    """Get model-specific markers dictionary.
 
-    Accesses `_root_.model.available_model_specific_configs` based on
-    `_root_.model.model_name_or_path`.
-    Returns an empty DictConfig if markers are not found or on error.
+    This resolver looks up the model name in the
+    available_model_specific_configs and returns the corresponding
+    markers dictionary.
     """
-    try:
-        if not hasattr(_root_, "model"):
-            # Should ideally log this error too
-            return OmegaConf.create({})
-        model_cfg = _root_.model
+    is_valid, model_name, error_msg = _validate_root_config(_root_)
+    if not is_valid:
+        return {}
 
-        if not hasattr(model_cfg, "model_name_or_path"):
-            return OmegaConf.create({})
-        model_name = model_cfg.model_name_or_path
+    model_cfg = _root_.model
+    available_configs = model_cfg.get("available_model_specific_configs", {})
 
-        specific_configs = getattr(
-            model_cfg, "available_model_specific_configs", None
-        )
-        if not isinstance(specific_configs, DictConfig):
-            return OmegaConf.create({})
+    if not isinstance(available_configs, (dict, DictConfig)):
+        return {}
 
-        current_model_specific_config = specific_configs.get(model_name)
-        if current_model_specific_config is None:
-            return OmegaConf.create({})
+    model_conf = available_configs.get(model_name, {})
+    if not isinstance(model_conf, (dict, DictConfig)):
+        return {}
 
-        markers_dict = getattr(current_model_specific_config, "markers", None)
-        if not isinstance(markers_dict, DictConfig):
-            return OmegaConf.create({})
+    markers = model_conf.get("markers", {})
+    if not isinstance(markers, (dict, DictConfig)):
+        return {}
 
-        return markers_dict
-    except Exception:
-        # Log unexpected errors in a real application
-        return OmegaConf.create({})  # Return empty dict on any error
+    return markers  # type: ignore
 
 
 def register_custom_resolvers() -> None:
@@ -143,6 +136,6 @@ def register_custom_resolvers() -> None:
     )
     OmegaConf.register_new_resolver(
         "get_model_markers_dict",
-        get_model_markers_dict_resolver,
+        _get_model_markers_dict,
         use_cache=False,  # Must be False when using _root_
     )

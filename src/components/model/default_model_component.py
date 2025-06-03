@@ -7,14 +7,10 @@ import logging  # noqa: E402,I100,I201
 from typing import Any, Dict, Optional, Tuple, cast
 
 from omegaconf import DictConfig
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from src.components.model.interface import ModelComponentInterface
-
-from transformers import (  # isort: skip  # noqa: E402,I100,I201
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-)
-
 
 # Config related functions will be moved/adapted from src.config
 # Model loading/saving functions from src.model
@@ -96,22 +92,48 @@ class DefaultModelComponent(ModelComponentInterface):
             return False
 
         lora_config = self.config.get("lora_config", {})
-        if not isinstance(
-            lora_config, (dict, DictConfig)
-        ):  # Ensure lora_config is a dict or DictConfig
+        if not isinstance(lora_config, (dict, DictConfig)):
             logger.error("'lora_config' must be a dictionary or DictConfig.")
             return False
+
         if not self.config.get("full_finetuning", False) and lora_config.get(
             "use_lora", False
         ):
-            if not isinstance(lora_config.get("r"), int) or not isinstance(
-                lora_config.get("lora_alpha"), (int, float)
-            ):
+            r_value = lora_config.get("r")
+            lora_alpha_value = lora_config.get("lora_alpha")
+
+            if not isinstance(r_value, int):
                 logger.error(
-                    "If using LoRA, 'r' (int) and 'lora_alpha' (int/float) "
-                    "must be specified in 'lora_config'."
+                    "If using LoRA, 'r' must be an integer in 'lora_config'."
                 )
                 return False
+
+            if not isinstance(lora_alpha_value, (int, float)):
+                logger.error(
+                    "If using LoRA, 'lora_alpha' must be an integer or float "
+                    "in 'lora_config'."
+                )
+                return False
+
+        # Validate markers if present
+        markers = self.config.get("markers", {})
+        if markers and not isinstance(markers, (dict, DictConfig)):
+            logger.error("'markers' must be a dictionary or DictConfig.")
+            return False
+
+        # Validate available_model_specific_configs if present
+        available_configs = self.config.get(
+            "available_model_specific_configs", {}
+        )
+        if available_configs and not isinstance(
+            available_configs, (dict, DictConfig)
+        ):
+            logger.error(
+                "'available_model_specific_configs' must be a dictionary or "
+                "DictConfig."
+            )
+            return False
+
         return True
 
     def initialize_model_and_tokenizer(
@@ -202,7 +224,7 @@ class DefaultModelComponent(ModelComponentInterface):
             FastLanguageModel.get_peft_model(
                 model,
                 r=r,
-                lora_alpha=lora_alpha,
+                lora_alpha=int(lora_alpha),  # Ensure it's an int
                 target_modules=target_modules,
                 lora_dropout=lora_config.get("lora_dropout", 0.0),
                 bias=lora_config.get("lora_bias", "none"),
@@ -210,7 +232,7 @@ class DefaultModelComponent(ModelComponentInterface):
                     "use_gradient_checkpointing", "unsloth"
                 ),
                 random_state=lora_config.get("random_state", 3407),
-                max_seq_length=self.config.get("max_seq_length"),
+                max_seq_length=self.config.get("max_seq_length", 1536),
                 finetune_vision_layers=lora_config.get(
                     "finetune_vision_layers", False
                 ),

@@ -5,11 +5,9 @@ from typing import Any, Callable, Dict, List, Optional
 import torch
 import torch.profiler as profiler
 from datasets import Dataset
-from transformers import (
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-    TrainerCallback,
-)
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.trainer_callback import TrainerCallback
 
 from src.components.training_loop.interface import TrainingLoopInterface
 
@@ -31,9 +29,6 @@ def get_trace_handler(
 class DefaultTrainingLoopComponent(TrainingLoopInterface):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        # self.config holds params for GRPOConfig and profiler, e.g.:
-        # "output_dir", "learning_rate", "max_prompt_length",
-        # "grpo_num_generations", "profile_enabled", etc.
 
     def validate_config(self) -> bool:
         required_args = [
@@ -52,12 +47,34 @@ class DefaultTrainingLoopComponent(TrainingLoopInterface):
         max_prompt_length = self.config.get("max_prompt_length")
         max_completion_length = self.config.get("max_completion_length")
 
-        if not isinstance(max_prompt_length, int) or not isinstance(
-            max_completion_length, int
+        if not isinstance(max_prompt_length, int):
+            logger.error("'max_prompt_length' must be an integer.")
+            return False
+
+        if not isinstance(max_completion_length, int):
+            logger.error("'max_completion_length' must be an integer.")
+            return False
+
+        # Validate other numeric fields if present
+        learning_rate = self.config.get("learning_rate")
+        if learning_rate is not None and not isinstance(
+            learning_rate, (int, float)
         ):
-            logger.error(
-                "'max_prompt_length' and 'max_seq_length' must be integers."
-            )
+            logger.error("'learning_rate' must be a number.")
+            return False
+
+        max_steps = self.config.get("max_steps")
+        if max_steps is not None and not isinstance(max_steps, int):
+            logger.error("'max_steps' must be an integer.")
+            return False
+
+        per_device_train_batch_size = self.config.get(
+            "per_device_train_batch_size"
+        )
+        if per_device_train_batch_size is not None and not isinstance(
+            per_device_train_batch_size, int
+        ):
+            logger.error("'per_device_train_batch_size' must be an integer.")
             return False
 
         return True

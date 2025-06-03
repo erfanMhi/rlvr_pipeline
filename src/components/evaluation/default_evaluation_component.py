@@ -4,15 +4,16 @@ from typing import Any, Dict, List, Optional
 import torch
 import wandb  # For logging metrics
 from datasets import Dataset
+from omegaconf import DictConfig, ListConfig
 from tqdm.auto import tqdm
-from transformers import (
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.trainer_callback import (
     TrainerCallback,
     TrainerControl,
     TrainerState,
-    TrainingArguments,
 )
+from transformers.training_args import TrainingArguments
 
 from src.components.data.interface import DataComponentInterface
 from src.components.evaluation.interface import EvaluationComponentInterface
@@ -119,11 +120,13 @@ def evaluate_model_core(
         # Convert to flat list of strings for generation
         prompts_for_generation = [
             tokenizer.apply_chat_template(
-                ex["prompt"], tokenize=False, add_generation_prompt=True
+                ex["prompt"],
+                tokenize=False,  # type: ignore
+                add_generation_prompt=True,
             )
             for ex in eval_dataset
         ]
-        ground_truths = [ex["answer"] for ex in eval_dataset]
+        ground_truths = [ex["answer"] for ex in eval_dataset]  # type: ignore
     except KeyError as e:
         logger.error(f"Dataset {dataset_name_for_logging} missing field: {e}")
         return 0.0
@@ -409,10 +412,8 @@ class CustomEvaluationCallback(TrainerCallback):
 
 class DefaultEvaluationComponent(EvaluationComponentInterface):
 
-    def __init__(
-        self, eval_config: Dict[str, Any], prompts_config: Dict[str, Any]
-    ):
-        super().__init__(eval_config)  # eval_config is now self.config
+    def __init__(self, config: Dict[str, Any], prompts_config: Dict[str, Any]):
+        super().__init__(config)  # eval_config is now self.config
         self.prompts_config = prompts_config
         self.data_component_instance: Optional[DataComponentInterface] = None
         self.model_component_instance: Optional[ModelComponentInterface] = None
@@ -471,9 +472,50 @@ class DefaultEvaluationComponent(EvaluationComponentInterface):
             self.config["enabled"] = False
             return True
 
+        # Validate eval_datasets_names is a list
+        if not isinstance(eval_datasets_names, (list, ListConfig)):
+            logger.error("'eval_datasets_names' must be a list or ListConfig.")
+            return False
+
         eval_steps = self.config.get("eval_steps")
         if not isinstance(eval_steps, int) or eval_steps <= 0:
             logger.error("'eval_steps' must be a positive int for evaluation.")
+            return False
+
+        # Validate eval_dataset_prompt_keys if present
+        eval_dataset_prompt_keys = self.config.get(
+            "eval_dataset_prompt_keys", {}
+        )
+        if eval_dataset_prompt_keys and not isinstance(
+            eval_dataset_prompt_keys, (dict, DictConfig)
+        ):
+            logger.error(
+                "'eval_dataset_prompt_keys' must be a dict or DictConfig."
+            )
+            return False
+
+        # Validate eval_max_new_tokens if present
+        eval_max_new_tokens = self.config.get("eval_max_new_tokens")
+        if eval_max_new_tokens is not None and not isinstance(
+            eval_max_new_tokens, int
+        ):
+            logger.error("'eval_max_new_tokens' must be an integer.")
+            return False
+
+        # Validate eval_num_samples if present
+        eval_num_samples = self.config.get("eval_num_samples")
+        if eval_num_samples is not None and not isinstance(
+            eval_num_samples, int
+        ):
+            logger.error("'eval_num_samples' must be an integer.")
+            return False
+
+        # Validate eval_batch_size if present
+        eval_batch_size = self.config.get("eval_batch_size")
+        if eval_batch_size is not None and not isinstance(
+            eval_batch_size, int
+        ):
+            logger.error("'eval_batch_size' must be an integer.")
             return False
 
         # TODO: validate prompt later

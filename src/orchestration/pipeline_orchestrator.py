@@ -1,23 +1,15 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from src.components.data.default_data_component import DefaultDataComponent
+from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf
+from transformers.trainer_callback import TrainerState
+
 from src.components.data.interface import DataComponentInterface
-from src.components.evaluation.default_evaluation_component import (
-    DefaultEvaluationComponent,
-)
 from src.components.evaluation.interface import EvaluationComponentInterface
-from src.components.model.default_model_component import DefaultModelComponent
 from src.components.model.interface import ModelComponentInterface
 from src.components.observers.interface import ObserverInterface
-from src.components.observers.wandb_observer import WandbObserver
-from src.components.reward.default_reward_component import (
-    DefaultRewardComponent,
-)
 from src.components.reward.interface import RewardComponentInterface
-from src.components.training_loop.default_training_loop import (
-    DefaultTrainingLoopComponent,
-)
 from src.components.training_loop.interface import TrainingLoopInterface
 
 logger = logging.getLogger(__name__)
@@ -26,7 +18,7 @@ logger = logging.getLogger(__name__)
 class PipelineOrchestrator:
     """Orchestrates the ML pipeline by managing and running components."""
 
-    def __init__(self, pipeline_config: Dict[str, Any]):
+    def __init__(self, pipeline_config: DictConfig):
         self.pipeline_config = pipeline_config
         self.observers: List[ObserverInterface] = []
         self.data_component: Optional[DataComponentInterface] = None
@@ -53,35 +45,26 @@ class PipelineOrchestrator:
     def _init_observers(self) -> None:
         observer_configs = self.pipeline_config.get("observers", [])
         for obs_conf in observer_configs:
-            observer_target = obs_conf.get("_target_")
-            config = obs_conf.get("config", {})
-
-            # Example for WandbObserver, assuming _target_ is its full path
-            # Adjust this check if your _target_ values are different
-            if (
-                observer_target
-                == "src.components.observers.wandb_observer.WandbObserver"
-            ):
-                try:
-                    observer = WandbObserver(config)
-                    if observer.validate_config():
-                        self.observers.append(observer)
-                        logger.info("Initialized WandbObserver.")
-                    else:
-                        logger.error(
-                            "WandbObserver config invalid. Not adding."
-                        )
-                except Exception as e:
-                    msg = f"Failed to initialize WandbObserver: {e}"
-                    logger.error(msg, exc_info=True)
-            elif observer_target:  # Handle other potential observers if any
-                logger.warning(
-                    f"Unknown or unhandled observer target: {observer_target}"
-                )
-            else:
-                logger.warning(
-                    "Observer configuration missing '_target_' key."
-                )
+            try:
+                # Create properly structured config for observer
+                observer_config = self._create_component_config(obs_conf)
+                observer = instantiate(observer_config)
+                if observer is not None and observer.validate_config():
+                    self.observers.append(observer)
+                    logger.info(
+                        f"Initialized observer: {type(observer).__name__}"
+                    )
+                else:
+                    observer_name = (
+                        type(observer).__name__ if observer else "None"
+                    )
+                    logger.error(
+                        f"Observer config invalid or instantiation failed: "
+                        f"{observer_name}"
+                    )
+            except Exception as e:
+                msg = f"Failed to initialize observer: {e}"
+                logger.error(msg, exc_info=True)
         logger.info(f"Initialized {len(self.observers)} observers.")
 
     def _notify_observers(self, event: str, *args: Any, **kwargs: Any) -> None:
@@ -94,17 +77,50 @@ class PipelineOrchestrator:
                 msg = f"Error notifying observer for event {event}: {e}"
                 logger.error(msg, exc_info=True)
 
+    def _create_component_config(
+        self, component_config: Union[DictConfig, Dict[str, Any]]
+    ) -> DictConfig:
+        """Create a properly structured config for component instantiation.
+
+        Args:
+            component_config: The original component configuration from
+                pipeline_config
+
+        Returns:
+            DictConfig with _target_ and config keys properly structured
+        """
+        target = component_config["_target_"]
+        # Create a copy to avoid modifying the original
+        config_copy = DictConfig(component_config)
+        del config_copy["_target_"]
+
+        return DictConfig(
+            {
+                "_target_": target,
+                "config": config_copy,
+            }
+        )
+
     def _init_data_component(self) -> None:
         if "data" not in self.pipeline_config:
             raise ValueError(
                 "Data component configuration ('data') is missing "
                 "in pipeline_config."
             )
-        data_c_config = self.pipeline_config["data"]
-        self.data_component = DefaultDataComponent(data_c_config)
-        if not self.data_component.validate_config():
-            raise ValueError("DataComponent configuration is invalid.")
-        logger.info("DataComponent initialized.")
+        try:
+            # Create properly structured config for data component
+            data_config = self._create_component_config(
+                self.pipeline_config.data
+            )
+            self.data_component = instantiate(data_config)
+            if self.data_component is None:
+                raise ValueError("DataComponent instantiation returned None")
+            if not self.data_component.validate_config():
+                raise ValueError("DataComponent configuration is invalid.")
+            logger.info("DataComponent initialized.")
+        except Exception as e:
+            logger.error(f"Failed to initialize DataComponent: {e}")
+            raise
 
     def _init_model_component(self) -> None:
         if "model" not in self.pipeline_config:
@@ -112,18 +128,39 @@ class PipelineOrchestrator:
                 "Model component configuration ('model') is missing "
                 "in pipeline_config."
             )
-        model_c_config = self.pipeline_config["model"]
-        self.model_component = DefaultModelComponent(model_c_config)
-        if not self.model_component.validate_config():
-            raise ValueError("ModelComponent configuration is invalid.")
-        logger.info("ModelComponent initialized.")
+        try:
+            # Create properly structured config for model component
+            resolved_config = OmegaConf.to_container(
+                self.pipeline_config, resolve=True
+            )  # need to resolve it beforehand because of the interpolations
+            model_config = self._create_component_config(
+                resolved_config["model"]
+            )
+            self.model_component = instantiate(model_config)
+            if self.model_component is None:
+                raise ValueError("ModelComponent instantiation returned None")
+            if not self.model_component.validate_config():
+                raise ValueError("ModelComponent configuration is invalid.")
+            logger.info("ModelComponent initialized.")
+        except Exception as e:
+            logger.error(f"Failed to initialize ModelComponent: {e}")
+            raise
 
     def _init_reward_component(self) -> None:
-        reward_c_config = self.pipeline_config.get("reward", {})
-        self.reward_component = DefaultRewardComponent(reward_c_config)
-        if not self.reward_component.validate_config():
-            raise ValueError("RewardComponent configuration is invalid.")
-        logger.info("RewardComponent initialized.")
+        try:
+            # Create properly structured config for reward component
+            reward_config = self._create_component_config(
+                self.pipeline_config.reward
+            )
+            self.reward_component = instantiate(reward_config)
+            if self.reward_component is None:
+                raise ValueError("RewardComponent instantiation returned None")
+            if not self.reward_component.validate_config():
+                raise ValueError("RewardComponent configuration is invalid.")
+            logger.info("RewardComponent initialized.")
+        except Exception as e:
+            logger.error(f"Failed to initialize RewardComponent: {e}")
+            raise
 
     def _init_training_loop_component(self) -> None:
         if "train" not in self.pipeline_config:
@@ -131,13 +168,27 @@ class PipelineOrchestrator:
                 "Training loop component configuration ('train') is missing "
                 "in pipeline_config."
             )
-        train_c_config = self.pipeline_config["train"]
-        self.training_loop_component = DefaultTrainingLoopComponent(
-            train_c_config
-        )
-        if not self.training_loop_component.validate_config():
-            raise ValueError("TrainingLoopComponent configuration is invalid.")
-        logger.info("TrainingLoopComponent initialized.")
+        try:
+            # For interpolation purposes we need to resolve it before creation
+            resolved_config = OmegaConf.to_container(
+                self.pipeline_config, resolve=True
+            )  # need to resolve it beforehand because of the interpolations
+            training_config = self._create_component_config(
+                resolved_config["train"]
+            )
+            self.training_loop_component = instantiate(training_config)
+            if self.training_loop_component is None:
+                raise ValueError(
+                    "TrainingLoopComponent instantiation returned None"
+                )
+            if not self.training_loop_component.validate_config():
+                raise ValueError(
+                    "TrainingLoopComponent configuration is invalid."
+                )
+            logger.info("TrainingLoopComponent initialized.")
+        except Exception as e:
+            logger.error(f"Failed to initialize TrainingLoopComponent: {e}")
+            raise
 
     def _init_evaluation_component(self) -> None:
         eval_section_config = self.pipeline_config.get("eval")
@@ -160,25 +211,39 @@ class PipelineOrchestrator:
                     "empty, but is required for the EvaluationComponent."
                 )
 
-            self.evaluation_component = DefaultEvaluationComponent(
-                eval_config=eval_section_config, prompts_config=prompts_config
-            )
-            if not self.evaluation_component.validate_config():
-                raise ValueError(
-                    "EvaluationComponent configuration is invalid."
+            try:
+                # Create config with eval_config and prompts_config
+                eval_component_config = self._create_component_config(
+                    eval_section_config
                 )
-            if (
-                isinstance(
-                    self.evaluation_component, DefaultEvaluationComponent
-                )
-                and self.data_component
-                and self.model_component
-            ):
-                self.evaluation_component.set_dependencies(
-                    data_comp=self.data_component,
-                    model_comp=self.model_component,
-                )
-            logger.info("EvaluationComponent initialized.")
+                # Add prompts_config to the restructured config
+                eval_component_config["prompts_config"] = prompts_config
+                self.evaluation_component = instantiate(eval_component_config)
+
+                if self.evaluation_component is None:
+                    raise ValueError(
+                        "EvaluationComponent instantiation returned None"
+                    )
+                if not self.evaluation_component.validate_config():
+                    raise ValueError(
+                        "EvaluationComponent configuration is invalid."
+                    )
+
+                # Set dependencies if the component supports it
+                if (
+                    hasattr(self.evaluation_component, "set_dependencies")
+                    and self.data_component
+                    and self.model_component
+                ):
+                    # Type ignore: set_dependencies not in interface
+                    self.evaluation_component.set_dependencies(  # type: ignore
+                        data_comp=self.data_component,
+                        model_comp=self.model_component,
+                    )
+                logger.info("EvaluationComponent initialized.")
+            except Exception as e:
+                logger.error(f"Failed to initialize EvaluationComponent: {e}")
+                raise
         else:
             logger.info("EvaluationComponent is disabled in config.")
 
@@ -232,7 +297,7 @@ class PipelineOrchestrator:
             system_prompts_dict = prompts_config.get("system_prompts")
 
             if (
-                not isinstance(system_prompts_dict, dict)
+                not isinstance(system_prompts_dict, (dict, DictConfig))
                 or not system_prompts_dict
             ):
                 raise ValueError(
@@ -334,8 +399,6 @@ class PipelineOrchestrator:
                 self._notify_observers(
                     "on_step_start", step_name="post_train_eval"
                 )
-
-                from transformers import TrainerState
 
                 mock_state = TrainerState()
                 self.evaluation_component.on_evaluation_run(
