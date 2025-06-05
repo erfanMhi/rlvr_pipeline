@@ -133,6 +133,17 @@ class PipelineOrchestrator:
             resolved_config = OmegaConf.to_container(
                 self.pipeline_config, resolve=True
             )  # need to resolve it beforehand because of the interpolations
+
+            # Type safety check
+            if not isinstance(resolved_config, dict):
+                raise ValueError(
+                    f"Expected resolved_config to be a dict, got "
+                    f"{type(resolved_config)}"
+                )
+
+            if "model" not in resolved_config:
+                raise ValueError("'model' key not found in resolved_config")
+
             model_config = self._create_component_config(
                 resolved_config["model"]
             )
@@ -173,6 +184,17 @@ class PipelineOrchestrator:
             resolved_config = OmegaConf.to_container(
                 self.pipeline_config, resolve=True
             )  # need to resolve it beforehand because of the interpolations
+
+            # Type safety check
+            if not isinstance(resolved_config, dict):
+                raise ValueError(
+                    f"Expected resolved_config to be a dict, got "
+                    f"{type(resolved_config)}"
+                )
+
+            if "train" not in resolved_config:
+                raise ValueError("'train' key not found in resolved_config")
+
             training_config = self._create_component_config(
                 resolved_config["train"]
             )

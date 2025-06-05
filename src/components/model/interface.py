@@ -1,7 +1,8 @@
 from abc import abstractmethod
 from typing import Dict, Optional, Tuple
 
-from transformers import PreTrainedModel, PreTrainedTokenizerBase
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from src.components.base_component import BaseComponent
 

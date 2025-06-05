@@ -2,11 +2,9 @@ from abc import abstractmethod
 from typing import Callable, List, Optional
 
 from datasets import Dataset
-from transformers import (
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-    TrainerCallback,
-)
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.trainer_callback import TrainerCallback
 
 from src.components.base_component import BaseComponent
 

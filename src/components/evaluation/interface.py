@@ -1,12 +1,9 @@
 from abc import abstractmethod
 from typing import Optional
 
-from transformers import (
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-    TrainerCallback,
-    TrainerState,
-)
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.trainer_callback import TrainerCallback, TrainerState
 
 from src.components.base_component import BaseComponent
 from src.components.data.interface import DataComponentInterface
