@@ -264,6 +264,15 @@ class DefaultDataComponent(DataComponentInterface):
             self._processor = None
             return
 
+        # Validate that dataset_load_path is a string
+        if not isinstance(self._dataset_load_path, str):
+            logger.error(
+                f"'dataset_path' or 'dataset_name' must be a string, got "
+                f"{type(self._dataset_load_path).__name__}"
+            )
+            self._processor = None
+            return
+
         processor_key = self._dataset_name_key.lower()
         processor_class = PROCESSOR_REGISTRY.get(processor_key)
 
