@@ -352,14 +352,14 @@ def check_numbers(
             match.group(1) if match and match.group(1) else None
         )
 
-        # Debug print, consider replacing with logger.debug
-        if i == 0:  # Print only for the first item for brevity
-            print(
+        if i == 0:  # Log only for the first item for brevity
+            logger.debug(
+                "%s Question:\n%s\nAnswer:\n%s\nResponse:\n%s\nExtracted:\n%s",
                 "*" * 20,
-                f"Question:\\n{question_content}",
-                f"\\nAnswer:\\n{true_answer_str}",
-                f"\\nResponse:\\n{response_str}",
-                f"\\nExtracted:\\n{extracted_guess_str}",
+                question_content,
+                true_answer_str,
+                response_str,
+                extracted_guess_str,
             )
 
         if extracted_guess_str is None:

@@ -366,7 +366,12 @@ class CustomEvaluationCallback(TrainerCallback):
     ) -> None:
         """Fallback logging to console when WandB is not available."""
         for metric_name, value in metrics_to_log.items():
-            print(f"EVAL METRIC: {metric_name}={value} step={current_step}")
+            logger.info(
+                "EVAL METRIC: %s=%s step=%s",
+                metric_name,
+                value,
+                current_step,
+            )
 
     def on_train_begin(
         self,
